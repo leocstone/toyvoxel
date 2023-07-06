@@ -99,8 +99,8 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 proj;
 };
 
-const uint32_t WIDTH = 1366;
-const uint32_t HEIGHT = 768;
+const uint32_t WIDTH = 1920;
+const uint32_t HEIGHT = 1080;
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
@@ -219,8 +219,8 @@ private:
     double cursorLastY;
     double cameraRotY;
     double cameraRotZ;
-    static constexpr double minPitch = -1.0;
-    static constexpr double maxPitch = 1.0;
+    static constexpr double minPitch = -1.3;
+    static constexpr double maxPitch = 1.3;
     static constexpr double sensitivity = 2.0;
     std::chrono::time_point<std::chrono::high_resolution_clock> lastFrameStart;
 
@@ -259,7 +259,7 @@ private:
     void initWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        window = glfwCreateWindow(WIDTH, HEIGHT, "yesheng", nullptr, nullptr);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "yesheng", glfwGetPrimaryMonitor(), nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
         for (int i = 0; i < GLFW_KEY_LAST; i++) {
@@ -411,6 +411,26 @@ private:
             descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             descriptorWrite.descriptorCount = 1;
             descriptorWrite.pImageInfo = &outputImageInfo;
+
+            vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+        }
+    }
+
+    void updateDescriptorSets() {
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            VkDescriptorImageInfo inputImageInfo {};
+            inputImageInfo.sampler = textureSampler;
+            inputImageInfo.imageView = renderImageViews[i];
+            inputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+            VkWriteDescriptorSet descriptorWrite {};
+            descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite.dstSet = descriptorSets[i];
+            descriptorWrite.dstBinding = 1;
+            descriptorWrite.dstArrayElement = 0;
+            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrite.descriptorCount = 1;
+            descriptorWrite.pImageInfo = &inputImageInfo;
 
             vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
         }
@@ -1050,6 +1070,7 @@ private:
         createFramebuffers();
         createRenderImages();
         createRenderImageViews();
+        updateDescriptorSets();
         updateComputeDescriptorSets();
     }
 
@@ -1837,7 +1858,7 @@ private:
             drawFrame();
             const auto end = std::chrono::steady_clock::now();
             const std::chrono::duration<double> elapsed_seconds = end - start;
-            std::cout << 1 / elapsed_seconds.count() << std::endl;
+            //std::cout << 1 / elapsed_seconds.count() << std::endl;
         }
 
         vkDeviceWaitIdle(device);
@@ -1885,9 +1906,9 @@ private:
         camera.up = glm::normalize(glm::vec3(glm::cos(cameraRotZ) * glm::cos(cameraRotY + glm::radians(90.0f)), glm::sin(cameraRotZ) * glm::cos(cameraRotY + glm::radians(90.0f)), glm::sin(cameraRotY + glm::radians(90.0f))));
         camera.right = -glm::cross(camera.forward, camera.up);
 
-        printf("Fwd: (%f, %f, %f)\n", camera.forward.x, camera.forward.y, camera.forward.z);
-        printf("Up: (%f, %f, %f)\n", camera.up.x, camera.up.y, camera.up.z);
-        printf("Right: (%f, %f, %f)\n", camera.right.x, camera.right.y, camera.right.z);
+        //printf("Fwd: (%f, %f, %f)\n", camera.forward.x, camera.forward.y, camera.forward.z);
+        //printf("Up: (%f, %f, %f)\n", camera.up.x, camera.up.y, camera.up.z);
+        //printf("Right: (%f, %f, %f)\n", camera.right.x, camera.right.y, camera.right.z);
 
         /* Camera position */
         glm::vec3 moveDirection(0, 0, 0);
@@ -1905,7 +1926,7 @@ private:
         std::cout << "Camera: " << camera.position.x << ", " << camera.position.y << ", " << camera.position.z << std::endl;
         std::cout << "W: " << keyPressed[GLFW_KEY_W] << " A: " << keyPressed[GLFW_KEY_A] << " S: " << keyPressed[GLFW_KEY_S] << " D: " << keyPressed[GLFW_KEY_D] << std::endl;
         */
-        std::cout << "x: " << cursorDeltaX << " y: " << cursorDeltaY << std::endl;
+        //std::cout << "x: " << cursorDeltaX << " y: " << cursorDeltaY << std::endl;
         /* Compute shader block */
         memcpy(computeUniformsMapped[currentFrame], &camera, sizeof(camera));
 
