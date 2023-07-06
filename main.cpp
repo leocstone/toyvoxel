@@ -1,6 +1,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+//#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -9,6 +10,7 @@
 #include <stdexcept>
 #include <cstdlib>
 #include <cstring>
+#include <cstdio>
 #include <vector>
 #include <optional>
 #include <set>
@@ -23,6 +25,13 @@
 #include "lib/stb_image.h"
 
 #include <vulkan/vk_enum_string_helper.h>
+
+struct Camera {
+    alignas(16) glm::vec3 position = glm::vec3(-1, 0, 0);
+    alignas(16) glm::vec3 forward = glm::vec3(1, 0, 0);
+    alignas(16) glm::vec3 up = glm::vec3(0, 0, 1);
+    alignas(16) glm::vec3 right = glm::vec3(0, 1, 0);
+};
 
 struct Vertex {
     glm::vec2 pos;
@@ -90,8 +99,8 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 proj;
 };
 
-const uint32_t WIDTH = 800;
-const uint32_t HEIGHT = 600;
+const uint32_t WIDTH = 1366;
+const uint32_t HEIGHT = 768;
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
@@ -197,7 +206,55 @@ private:
     VkPipeline computePipeline;
     VkPipelineLayout computePipelineLayout;
 
+    std::vector<VkBuffer> computeUniformBuffers;
+    std::vector<VkDeviceMemory> computeUniformsMemory;
+    std::vector<void*> computeUniformsMapped;
+
+    /* Camera */
+    Camera camera;
+    bool keyPressed[GLFW_KEY_LAST+1];
+    double cursorX;
+    double cursorY;
+    double cursorLastX;
+    double cursorLastY;
+    double cameraRotY;
+    double cameraRotZ;
+    static constexpr double minPitch = -1.0;
+    static constexpr double maxPitch = 1.0;
+    static constexpr double sensitivity = 2.0;
+    std::chrono::time_point<std::chrono::high_resolution_clock> lastFrameStart;
+
     bool framebufferResized = false;
+    bool shouldQuit = false;
+
+    static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+        HelloTriangleApplication* app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        if (key <= GLFW_KEY_LAST && key >= 0) {
+            switch(action) {
+            case GLFW_PRESS:
+                if (key == GLFW_KEY_Q) {
+                    app->shouldQuit = true;
+                }
+                app->keyPressed[key] = true;
+                break;
+            case GLFW_RELEASE:
+                app->keyPressed[key] = false;
+                break;
+            case GLFW_REPEAT:
+            default:
+                break;
+            }
+        }
+    }
+
+    static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
+        HelloTriangleApplication* app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+
+        app->cursorLastX = app->cursorX;
+        app->cursorLastY = app->cursorY;
+        app->cursorX = xpos;
+        app->cursorY = ypos;
+    }
 
     void initWindow() {
         glfwInit();
@@ -205,6 +262,17 @@ private:
         window = glfwCreateWindow(WIDTH, HEIGHT, "yesheng", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+        for (int i = 0; i < GLFW_KEY_LAST; i++) {
+            keyPressed[i] = false;
+        }
+        glfwSetKeyCallback(window, keyCallback);
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        if (glfwRawMouseMotionSupported())
+            glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+        glfwGetCursorPos(window, &cursorX, &cursorY);
+        cursorLastX = cursorX;
+        cursorLastY = cursorY;
+        //glfwSetCursorPosCallback(window, cursorPosCallback);
     }
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
@@ -239,14 +307,32 @@ private:
         createSyncObjects();
         createComputeDescriptorSetLayout();
         createComputePipeline();
+        createComputeUniformBuffers();
         createComputeDescriptorPool();
         createComputeDescriptorSets();
     }
 
+    void createComputeUniformBuffers() {
+        VkDeviceSize bufferSize = sizeof(Camera);
+
+        computeUniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        computeUniformsMemory.resize(MAX_FRAMES_IN_FLIGHT);
+        computeUniformsMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                         computeUniformBuffers[i], computeUniformsMemory[i]);
+            vkMapMemory(device, computeUniformsMemory[i], 0, bufferSize, 0, &computeUniformsMapped[i]);
+        }
+    }
+
     void createComputeDescriptorPool() {
-        std::array<VkDescriptorPoolSize, 1> poolSizes {};
-        poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        std::array<VkDescriptorPoolSize, 2> poolSizes {};
+        poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
         VkDescriptorPoolCreateInfo poolInfo {};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -277,33 +363,72 @@ private:
         }
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            VkDescriptorBufferInfo bufferInfo {};
+            bufferInfo.buffer = computeUniformBuffers[i];
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeof(Camera);
+
             VkDescriptorImageInfo outputImageInfo {};
             outputImageInfo.sampler = textureSampler;
             outputImageInfo.imageView = renderImageViews[i];
             outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-            std::array<VkWriteDescriptorSet, 1> descriptorWrites {};
+            std::array<VkWriteDescriptorSet, 2> descriptorWrites {};
 
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstSet = computeDescriptorSets[i];
             descriptorWrites[0].dstBinding = 0;
             descriptorWrites[0].dstArrayElement = 0;
-            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             descriptorWrites[0].descriptorCount = 1;
-            descriptorWrites[0].pImageInfo = &outputImageInfo;
+            descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+            descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[1].dstSet = computeDescriptorSets[i];
+            descriptorWrites[1].dstBinding = 1;
+            descriptorWrites[1].dstArrayElement = 0;
+            descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            descriptorWrites[1].descriptorCount = 1;
+            descriptorWrites[1].pImageInfo = &outputImageInfo;
 
             vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                    descriptorWrites.data(), 0, nullptr);
         }
     }
 
+    void updateComputeDescriptorSets() {
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            VkDescriptorImageInfo outputImageInfo {};
+            outputImageInfo.sampler = textureSampler;
+            outputImageInfo.imageView = renderImageViews[i];
+            outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+            VkWriteDescriptorSet descriptorWrite {};
+            descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite.dstSet = computeDescriptorSets[i];
+            descriptorWrite.dstBinding = 1;
+            descriptorWrite.dstArrayElement = 0;
+            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            descriptorWrite.descriptorCount = 1;
+            descriptorWrite.pImageInfo = &outputImageInfo;
+
+            vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
+        }
+    }
+
     void createComputeDescriptorSetLayout() {
-        std::array<VkDescriptorSetLayoutBinding, 1> layoutBindings {};
+        std::array<VkDescriptorSetLayoutBinding, 2> layoutBindings {};
         layoutBindings[0].binding = 0;
+        layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         layoutBindings[0].descriptorCount = 1;
-        layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        layoutBindings[0].pImmutableSamplers = nullptr;
         layoutBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        layoutBindings[0].pImmutableSamplers = nullptr;
+
+        layoutBindings[1].binding = 1;
+        layoutBindings[1].descriptorCount = 1;
+        layoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        layoutBindings[1].pImmutableSamplers = nullptr;
+        layoutBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
         VkDescriptorSetLayoutCreateInfo layoutInfo {};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -925,6 +1050,7 @@ private:
         createFramebuffers();
         createRenderImages();
         createRenderImageViews();
+        updateComputeDescriptorSets();
     }
 
     void createSyncObjects() {
@@ -1704,7 +1830,8 @@ private:
     }
 
     void mainLoop() {
-        while (!glfwWindowShouldClose(window)) {
+        lastFrameStart = std::chrono::high_resolution_clock::now();
+        while (!glfwWindowShouldClose(window) && !shouldQuit) {
             const auto start = std::chrono::steady_clock::now();
             glfwPollEvents();
             drawFrame();
@@ -1717,6 +1844,9 @@ private:
     }
 
     void drawFrame() {
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastFrameStart).count();
+        lastFrameStart = std::chrono::high_resolution_clock::now();
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
         uint32_t imageIndex;
@@ -1733,7 +1863,52 @@ private:
 
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
+        /* Update camera */
+        cursorLastX = cursorX;
+        cursorLastY = cursorY;
+        glfwGetCursorPos(window, &cursorX, &cursorY);
+        double cursorDeltaX = cursorX - cursorLastX;
+        double cursorDeltaY = cursorY - cursorLastY;
+        // Normalize for DPI ?
+        cursorDeltaX /= double(swapChainExtent.width);
+        cursorDeltaY /= double(swapChainExtent.height);
+        cursorDeltaX *= sensitivity;
+        cursorDeltaY *= sensitivity;
+
+        /* Camera rotation */
+        cameraRotY -= cursorDeltaY;
+        cameraRotZ -= cursorDeltaX;
+
+        cameraRotY = glm::clamp(cameraRotY, minPitch, maxPitch);
+
+        camera.forward = glm::normalize(glm::vec3(glm::cos(cameraRotZ) * glm::cos(cameraRotY), glm::sin(cameraRotZ) * glm::cos(cameraRotY), glm::sin(cameraRotY)));
+        camera.up = glm::normalize(glm::vec3(glm::cos(cameraRotZ) * glm::cos(cameraRotY + glm::radians(90.0f)), glm::sin(cameraRotZ) * glm::cos(cameraRotY + glm::radians(90.0f)), glm::sin(cameraRotY + glm::radians(90.0f))));
+        camera.right = -glm::cross(camera.forward, camera.up);
+
+        printf("Fwd: (%f, %f, %f)\n", camera.forward.x, camera.forward.y, camera.forward.z);
+        printf("Up: (%f, %f, %f)\n", camera.up.x, camera.up.y, camera.up.z);
+        printf("Right: (%f, %f, %f)\n", camera.right.x, camera.right.y, camera.right.z);
+
+        /* Camera position */
+        glm::vec3 moveDirection(0, 0, 0);
+        if (keyPressed[GLFW_KEY_W])
+            moveDirection += camera.forward;
+        if (keyPressed[GLFW_KEY_S])
+            moveDirection -= camera.forward;
+        if (keyPressed[GLFW_KEY_A])
+            moveDirection += camera.right;
+        if (keyPressed[GLFW_KEY_D])
+            moveDirection -= camera.right;
+        camera.position += moveDirection * deltaTime;
+        /*
+        std::cout << "deltaTime: " << deltaTime << std::endl;
+        std::cout << "Camera: " << camera.position.x << ", " << camera.position.y << ", " << camera.position.z << std::endl;
+        std::cout << "W: " << keyPressed[GLFW_KEY_W] << " A: " << keyPressed[GLFW_KEY_A] << " S: " << keyPressed[GLFW_KEY_S] << " D: " << keyPressed[GLFW_KEY_D] << std::endl;
+        */
+        std::cout << "x: " << cursorDeltaX << " y: " << cursorDeltaY << std::endl;
         /* Compute shader block */
+        memcpy(computeUniformsMapped[currentFrame], &camera, sizeof(camera));
+
         vkResetCommandBuffer(computeCommandBuffers[currentFrame], 0);
         recordComputeCommandBuffer(computeCommandBuffers[currentFrame], imageIndex);
 
@@ -1834,6 +2009,11 @@ private:
         cleanupSwapChain();
 
         /* Clean up compute pipeline and related structures */
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vkDestroyBuffer(device, computeUniformBuffers[i], nullptr);
+            vkFreeMemory(device, computeUniformsMemory[i], nullptr);
+        }
+
         vkDestroyPipelineLayout(device, computePipelineLayout, nullptr);
         vkDestroyPipeline(device, computePipeline, nullptr);
 

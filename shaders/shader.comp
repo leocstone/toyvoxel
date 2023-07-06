@@ -7,15 +7,15 @@ struct VoxelChunk {
     uint voxels[CHUNK_WIDTH][CHUNK_WIDTH][CHUNK_HEIGHT];
 };
 */
-/*
+
 layout(binding = 0) uniform Camera {
     vec3 position;
     vec3 forward;
-    // Up is constant?
+    vec3 up;
+    vec3 right;
 } camera;
-*/
 
-layout(binding = 0, rgba8) uniform writeonly image2D outputImage;
+layout(binding = 1, rgba8) uniform writeonly image2D outputImage;
 /*
 layout(std140, binding = 1) readonly buffer VoxelChunkIn {
     VoxelChunk chunkIn;
@@ -25,12 +25,10 @@ layout(std140, binding = 2) buffer VoxelChunkOut {
     VoxelChunk chunkOut;
 };
 */
-const double VOXEL_SIZE = 1.0;
+const float VOXEL_SIZE = 1.0;
 
-const int MAX_STEPS = 32;
+const int MAX_STEPS = 64;
 
-// x: distance
-// y: hit a voxel if >0 (could be id later)
 float distanceToVoxel(vec3 origin, vec3 endpoint) {
     vec3 direction = normalize(endpoint - origin);
     
@@ -53,6 +51,30 @@ float distanceToVoxel(vec3 origin, vec3 endpoint) {
     return 0.0;
 }
 
+float lightIntensity(vec3 eye, vec3 point) {
+    const vec3 lightPos = vec3(-3, 3, 3);
+    const vec3 directionToEye = normalize(eye - point);
+    const vec3 directionToLight = normalize(lightPos - point);
+    const vec3 surfaceNormal = normalize(point); /* Unit sphere... */
+    return dot(directionToEye, directionToLight);
+}
+
+vec4 distanceToSphereAlongRay(vec3 origin, vec3 endpoint) {
+    vec3 direction = normalize(endpoint - origin);
+    
+    float curDistanceToSphere = length(origin) - 1.0;
+    vec3 checkedPoint = origin + direction * curDistanceToSphere;
+
+    if (length(checkedPoint) <= 1.01) {
+        return vec4(checkedPoint.xyz, curDistanceToSphere);
+    }
+    return vec4(-1);
+}
+
+vec3 skyboxColorInDirection(vec3 direction) {
+    return cos(direction.z) * vec3(0.2, 0.2, 0.8) + (direction.z + 1) * vec3(0.2, 0.2, 0.8) * 0.1;
+}
+
 layout (local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
 
 void main() {
@@ -65,26 +87,31 @@ void main() {
     const vec2 pixel = vec2(gl_GlobalInvocationID.xy);
     const vec2 pixelDimensions = vec2(sz);
     
-    const vec3 cameraPos = vec3(-CHUNK_SIZE, 0, CHUNK_SIZE * 2);
+    /*
+    const vec3 cameraPos = vec3(-2, 0, 0);
     const vec3 cameraForward = normalize(vec3(1, 0, 0));
     const vec3 cameraUp = vec3(0, 0, 1);
     const vec3 cameraRight = cross(cameraForward, cameraUp);
+    */
     
-    const float focalLength = 2.0;
-    const float lensX = 3.0;
+    const float focalLength = 1.0;
+    const float lensX = 1.0;
     const float lensY = (pixelDimensions.y / pixelDimensions.x) * lensX;
     
-    const vec3 rayOrigin = cameraPos;
-    vec3 rayDirection = cameraPos + cameraForward * focalLength + cameraForward;
+    const vec3 rayOrigin = camera.position;
+    vec3 rayDirection = camera.position + camera.forward * focalLength;
     // Cast ray through "lens" at corresponding pixel point
-    rayDirection -= cameraUp * (lensY / 2.0);
-    rayDirection -= cameraRight * (lensX / 2.0);
-    rayDirection += (pixel.x / pixelDimensions.x) * cameraRight;
-    rayDirection += (pixel.y / pixelDimensions.y) * cameraUp;
+    rayDirection += camera.up * (lensY / 2.0);
+    rayDirection -= camera.right * (lensX / 2.0);
+    rayDirection += (pixel.x / pixelDimensions.x) * camera.right * lensX;
+    rayDirection -= (pixel.y / pixelDimensions.y) * camera.up * lensY;
     
+    //vec4 rayCast = distanceToSphereAlongRay(rayOrigin, rayDirection);
+    //vec3 outputColor = rayCast.w > 0 ? vec3(1.0) * lightIntensity(rayOrigin, rayCast.xyz) : skyboxColorInDirection(normalize(rayDirection - rayOrigin)); 
     vec3 outputColor = vec3(distanceToVoxel(rayOrigin, rayDirection));
     
-    imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(outputColor.xyz, 1.0));
+    imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(outputColor, 1.0));
+    //imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(outputColor.xyz, 1.0));
     
     //imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(pixel.x / pixelDimensions.x, pixel.y / pixelDimensions.y, 0.0, 1.0));
 }
