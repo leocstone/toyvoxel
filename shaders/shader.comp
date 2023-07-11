@@ -25,31 +25,10 @@ layout(std140, binding = 2) buffer VoxelChunkOut {
     VoxelChunk chunkOut;
 };
 */
-const float VOXEL_SIZE = 1.0;
 
-const int MAX_STEPS = 64;
-
-float distanceToVoxel(vec3 origin, vec3 endpoint) {
-    vec3 direction = normalize(endpoint - origin);
-    
-    for (int i = 0; i < MAX_STEPS; i++) {
-        vec3 currentPos = origin + direction * i;
-        ivec3 currentVoxel = ivec3(currentPos);
-        // Skip out of bounds indices
-        if (currentVoxel.x < 0 || currentVoxel.x > CHUNK_SIZE)
-            continue;
-        if (currentVoxel.y < 0 || currentVoxel.y > CHUNK_SIZE)
-            continue;
-        if (currentVoxel.z < 0 || currentVoxel.z > CHUNK_HEIGHT)
-            continue;
-        if (int(currentVoxel.x + currentVoxel.y + currentVoxel.z) % 2 == 0) {
-            // This is definitely wrong - should be intersection with plane on voxel grid
-            return 1.0 - float(i) / float(MAX_STEPS);
-        }
-    }
-    
-    return 0.0;
-}
+const int MAX_STEPS = 32;
+const float MAX_DIST = 20.0;
+vec3 sunDir = normalize(vec3(1, -1, -1));
 
 float lightIntensity(vec3 eye, vec3 point) {
     const vec3 lightPos = vec3(-3, 3, 3);
@@ -59,21 +38,67 @@ float lightIntensity(vec3 eye, vec3 point) {
     return dot(directionToEye, directionToLight);
 }
 
-vec4 distanceToSphereAlongRay(vec3 origin, vec3 endpoint) {
+float distanceToSphere(vec3 point, vec3 sphereOrigin, float radius) {
+    return length(point - sphereOrigin) - radius;
+}
+
+float distanceToSDF(vec3 point) {
+    return distanceToSphere(point, vec3(0, 0, 0), 3.0);
+}
+
+/*
+Returns vec4:
+xyz: point of intersection
+w:   distance, or -1 if no intersection
+*/
+vec4 distanceToWorldAlongRay(vec3 origin, vec3 endpoint, float maxlen) {
     vec3 direction = normalize(endpoint - origin);
     
-    float curDistanceToSphere = length(origin) - 1.0;
-    vec3 checkedPoint = origin + direction * curDistanceToSphere;
-
-    if (length(checkedPoint) <= 1.01) {
-        return vec4(checkedPoint.xyz, curDistanceToSphere);
+    vec3 curPoint = origin;
+    float distTraveled = 0.0;
+    for (int i = 0; i < MAX_STEPS && distTraveled < maxlen; i++) {
+        float curDist = distanceToSDF(curPoint);
+        if (abs(curDist) <= 0.01) {
+            return vec4(curPoint, length(curPoint - origin));
+        }
+        curPoint += curDist * direction;
+        distTraveled += curDist;
     }
-    return vec4(-1);
+    
+    return vec4(-1.0);
+}
+
+float intersectionAlongRay(vec3 origin, vec3 endpoint, float maxlen) {
+    return distanceToWorldAlongRay(origin, endpoint, maxlen).w >= 0.0 ? 0.0 : 1.0;
+}
+
+/*
+Returns the normal of the world's surface at a given point
+*/
+vec3 worldNormal(vec3 point) {
+    return normalize(point);
+}
+
+/*
+Computes the intensity of lighting coming directly from the sun at a given point
+*/
+float directLightingAtPoint(vec3 point) {
+    if (intersectionAlongRay(point, -sunDir, MAX_DIST) <= 0.0) {
+        return 1.0 * dot(-sunDir, worldNormal(point));
+    }
+    return 0.0;
 }
 
 vec3 skyboxColorInDirection(vec3 direction) {
-    return cos(direction.z) * vec3(0.2, 0.2, 0.8) + (direction.z + 1) * vec3(0.2, 0.2, 0.8) * 0.1;
+    return vec3(0.42, 0.69, 0.92);
 }
+
+/* Copied from stackoverflow - random number in [0.0, 1.0] */
+float random(vec2 st) {
+    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+}
+
+const int SAMPLES = 4;
 
 layout (local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
 
@@ -97,6 +122,7 @@ void main() {
     const float focalLength = 1.0;
     const float lensX = 1.0;
     const float lensY = (pixelDimensions.y / pixelDimensions.x) * lensX;
+    const float pixelSize = lensX / pixelDimensions.x;
     
     const vec3 rayOrigin = camera.position;
     vec3 rayDirection = camera.position + camera.forward * focalLength;
@@ -107,10 +133,18 @@ void main() {
     rayDirection -= (pixel.y / pixelDimensions.y) * camera.up * lensY;
     
     //vec4 rayCast = distanceToSphereAlongRay(rayOrigin, rayDirection);
-    //vec3 outputColor = rayCast.w > 0 ? vec3(1.0) * lightIntensity(rayOrigin, rayCast.xyz) : skyboxColorInDirection(normalize(rayDirection - rayOrigin)); 
-    vec3 outputColor = vec3(distanceToVoxel(rayOrigin, rayDirection));
+    //vec3 outputColor = rayCast.w > 0 ? vec3(1.0) * lightIntensity(rayOrigin, rayCast.xyz) : skyboxColorInDirection(normalize(rayDirection - rayOrigin));
+    vec3 outputColor = vec3(0.0);
+    for (int i = 0; i < SAMPLES; i++) {
+        vec3 randomOffset = camera.right * random(vec2(pixel.x + i, pixel.y)) - camera.up * random(vec2(pixel.x, pixel.y + i));
+        vec3 curSampleDirection = rayDirection + randomOffset * pixelSize;
+        vec4 curSample = distanceToWorldAlongRay(rayOrigin, curSampleDirection, MAX_DIST);
+        outputColor += curSample.w >= 0.0 ? vec3(0.5) * directLightingAtPoint(curSample.xyz) : skyboxColorInDirection(curSampleDirection);
+    }
+    outputColor /= float(SAMPLES);
+    outputColor = vec3(pow(outputColor.x, 0.45), pow(outputColor.y, 0.45), pow(outputColor.z, 0.45));
     
-    imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(outputColor, 1.0));
+    imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(outputColor.xyz, 1.0));
     //imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(outputColor.xyz, 1.0));
     
     //imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(pixel.x / pixelDimensions.x, pixel.y / pixelDimensions.y, 0.0, 1.0));

@@ -99,8 +99,8 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 proj;
 };
 
-const uint32_t WIDTH = 1920;
-const uint32_t HEIGHT = 1080;
+const uint32_t WIDTH = 1024;
+const uint32_t HEIGHT = 768;
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
@@ -177,6 +177,7 @@ private:
     std::vector<VkSemaphore> computeFinishedSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
     std::vector<VkFence> inFlightFences;
+    std::vector<VkFence> computeFinishedFences;
 
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
@@ -217,8 +218,8 @@ private:
     double cursorY;
     double cursorLastX;
     double cursorLastY;
-    double cameraRotY;
-    double cameraRotZ;
+    double cameraRotY = 0.0;
+    double cameraRotZ = 0.0;
     static constexpr double minPitch = -1.3;
     static constexpr double maxPitch = 1.3;
     static constexpr double sensitivity = 2.0;
@@ -259,7 +260,7 @@ private:
     void initWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        window = glfwCreateWindow(WIDTH, HEIGHT, "yesheng", glfwGetPrimaryMonitor(), nullptr);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "yesheng", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
         for (int i = 0; i < GLFW_KEY_LAST; i++) {
@@ -767,7 +768,7 @@ private:
         renderImagesMemory.resize(MAX_FRAMES_IN_FLIGHT);
 
         for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            createImage(swapChainExtent.width, swapChainExtent.height, VK_FORMAT_R8G8B8A8_UNORM,
+            createImage(swapChainExtent.width / 2, swapChainExtent.height / 2, VK_FORMAT_R8G8B8A8_UNORM,
                         VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, renderImages[i], renderImagesMemory[i]);
             transitionImageLayout(renderImages[i], VK_FORMAT_R8G8B8A8_UNORM,
@@ -1061,10 +1062,15 @@ private:
             glfwWaitEvents();
         }
 
-        vkDeviceWaitIdle(device);
-
+        std::cout << "Recreating swapchain." << std::endl;
+        VkResult result;
+        if ((result = vkDeviceWaitIdle(device)) != VK_SUCCESS) {
+            std::cerr << string_VkResult(result) << std::endl;
+            throw std::runtime_error("vkDeviceWaitIdle failed!");
+        }
+        std::cout << "Device is idle." << std::endl;
         cleanupSwapChain();
-
+        std::cout << "Finished swapchain cleanup" << std::endl;
         createSwapChain();
         createImageViews();
         createFramebuffers();
@@ -1079,6 +1085,7 @@ private:
         computeFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
         inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+        computeFinishedFences.resize(MAX_FRAMES_IN_FLIGHT);
 
         VkSemaphoreCreateInfo semaphoreInfo {};
         semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -1087,12 +1094,17 @@ private:
         fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
+        VkFenceCreateInfo computeFenceInfo {};
+        computeFenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        computeFenceInfo.flags = 0;
+
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
             vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
             vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS ||
-            vkCreateSemaphore(device, &semaphoreInfo, nullptr, &computeFinishedSemaphores[i])) {
-                throw std::runtime_error("failed to create semaphores!");
+            vkCreateSemaphore(device, &semaphoreInfo, nullptr, &computeFinishedSemaphores[i]) != VK_SUCCESS ||
+            vkCreateFence(device, &computeFenceInfo, nullptr, &computeFinishedFences[i]) != VK_SUCCESS) {
+                throw std::runtime_error("failed to create sync objects!");
             }
         }
     }
@@ -1855,10 +1867,11 @@ private:
         while (!glfwWindowShouldClose(window) && !shouldQuit) {
             const auto start = std::chrono::steady_clock::now();
             glfwPollEvents();
+            //std::cout << "Frame " << currentFrame << std::endl;
             drawFrame();
             const auto end = std::chrono::steady_clock::now();
             const std::chrono::duration<double> elapsed_seconds = end - start;
-            //std::cout << 1 / elapsed_seconds.count() << std::endl;
+            std::cout << 1 / elapsed_seconds.count() << std::endl;
         }
 
         vkDeviceWaitIdle(device);
@@ -1869,7 +1882,6 @@ private:
         float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastFrameStart).count();
         lastFrameStart = std::chrono::high_resolution_clock::now();
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
-
         uint32_t imageIndex;
         VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX,
                               imageAvailableSemaphores[currentFrame],
@@ -1882,7 +1894,9 @@ private:
             throw std::runtime_error("failed to acquire swap chain image!");
         }
 
-        vkResetFences(device, 1, &inFlightFences[currentFrame]);
+        if (vkResetFences(device, 1, &inFlightFences[currentFrame]) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to reset fence!");
+        }
 
         /* Update camera */
         cursorLastX = cursorX;
@@ -1953,6 +1967,11 @@ private:
             throw std::runtime_error("failed to submit compute command buffer!");
         }
 
+        /*
+        vkWaitForFences(device, 1, &computeFinishedFences[currentFrame], VK_TRUE, UINT64_MAX);
+        vkResetFences(device, 1, &computeFinishedFences[currentFrame]);
+        */
+
         /* Graphics pipeline block */
         // Update uniform buffer
         updateUniformBuffer(currentFrame);
@@ -1965,7 +1984,7 @@ private:
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
         VkSemaphore waitSemaphores[] = {computeFinishedSemaphores[currentFrame]};
-        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+        VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT};
         submitInfo.waitSemaphoreCount = 1;
         submitInfo.pWaitSemaphores = waitSemaphores;
         submitInfo.pWaitDstStageMask = waitStages;
@@ -2002,7 +2021,7 @@ private:
         } else if (result != VK_SUCCESS) {
             throw std::runtime_error("failed to present swap chain image!");
         }
-
+        //std::cout << "End frame " << currentFrame << std::endl;
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
@@ -2070,6 +2089,7 @@ private:
             vkDestroySemaphore(device, computeFinishedSemaphores[i], nullptr);
             vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
             vkDestroyFence(device, inFlightFences[i], nullptr);
+            vkDestroyFence(device, computeFinishedFences[i], nullptr);
         }
 
         vkDestroyCommandPool(device, commandPool, nullptr);
