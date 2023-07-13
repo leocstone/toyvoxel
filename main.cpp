@@ -99,9 +99,9 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 proj;
 };
 
-const uint32_t WIDTH = 1024;
-const uint32_t HEIGHT = 768;
-const uint32_t RENDER_SCALE = 1;
+const uint32_t WIDTH = 1920;
+const uint32_t HEIGHT = 1080;
+const uint32_t RENDER_SCALE = 2;
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
@@ -261,7 +261,7 @@ private:
     void initWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        window = glfwCreateWindow(WIDTH, HEIGHT, "yesheng", nullptr, nullptr);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "yesheng", glfwGetPrimaryMonitor(), nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
         for (int i = 0; i < GLFW_KEY_LAST; i++) {
