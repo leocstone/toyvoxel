@@ -26,24 +26,41 @@ layout(std140, binding = 2) buffer VoxelChunkOut {
 };
 */
 
-const int MAX_STEPS = 32;
-const float MAX_DIST = 20.0;
+const int MAX_STEPS = 16;
+const float MAX_DIST = 100.0;
 vec3 sunDir = normalize(vec3(1, -1, -1));
 
-float lightIntensity(vec3 eye, vec3 point) {
-    const vec3 lightPos = vec3(-3, 3, 3);
-    const vec3 directionToEye = normalize(eye - point);
-    const vec3 directionToLight = normalize(lightPos - point);
-    const vec3 surfaceNormal = normalize(point); /* Unit sphere... */
-    return dot(directionToEye, directionToLight);
+/*
+Copied from iq
+*/
+float sdBox( vec3 p, vec3 b )
+{
+  vec3 q = abs(p) - b;
+  return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
+}
+
+float sdBoxFrame( vec3 p, vec3 b, float e )
+{
+       p = abs(p  )-b;
+  vec3 q = abs(p+e)-e;
+  return min(min(
+      length(max(vec3(p.x,q.y,q.z),0.0))+min(max(p.x,max(q.y,q.z)),0.0),
+      length(max(vec3(q.x,p.y,q.z),0.0))+min(max(q.x,max(p.y,q.z)),0.0)),
+      length(max(vec3(q.x,q.y,p.z),0.0))+min(max(q.x,max(q.y,p.z)),0.0));
+}
+
+float sdPlane( vec3 p, vec3 n, float h )
+{
+  // n must be normalized
+  return dot(p,n) + h;
 }
 
 float distanceToSphere(vec3 point, vec3 sphereOrigin, float radius) {
     return length(point - sphereOrigin) - radius;
 }
 
-float distanceToSDF(vec3 point) {
-    return distanceToSphere(point, vec3(0, 0, 0), 3.0);
+float distanceToWorld(vec3 point) {
+    return min(point.z, distanceToSphere(point, vec3(0.0, 0.0, 3.0), 1.0));
 }
 
 /*
@@ -54,39 +71,48 @@ w:   distance, or -1 if no intersection
 vec4 distanceToWorldAlongRay(vec3 origin, vec3 endpoint, float maxlen) {
     vec3 direction = normalize(endpoint - origin);
     
-    vec3 curPoint = origin;
     float distTraveled = 0.0;
     for (int i = 0; i < MAX_STEPS && distTraveled < maxlen; i++) {
-        float curDist = distanceToSDF(curPoint);
-        if (abs(curDist) <= 0.01) {
-            return vec4(curPoint, length(curPoint - origin));
+        float curDist = distanceToWorld(origin + direction * distTraveled);
+        if (curDist <= 0.000001) {
+            return vec4(origin + direction * distTraveled, distTraveled);
         }
-        curPoint += curDist * direction;
         distTraveled += curDist;
     }
     
     return vec4(-1.0);
 }
 
+/*
+Returns 1.0 if there is a world intersection along given ray, or -1.0 otherwise
+*/
 float intersectionAlongRay(vec3 origin, vec3 endpoint, float maxlen) {
-    return distanceToWorldAlongRay(origin, endpoint, maxlen).w >= 0.0 ? 0.0 : 1.0;
+    return distanceToWorldAlongRay(origin, endpoint, maxlen).w >= 0.0 ? 1.0 : -1.0;
 }
 
 /*
-Returns the normal of the world's surface at a given point
+Copied from iq's Menger Sponge example on shadertoy
 */
-vec3 worldNormal(vec3 point) {
-    return normalize(point);
+vec3 calcNormal(vec3 pos)
+{
+    vec3 eps = vec3(.001,0.0,0.0);
+    return normalize(vec3(
+            distanceToWorld(pos+eps.xyy).x - distanceToWorld(pos-eps.xyy).x,
+            distanceToWorld(pos+eps.yxy).x - distanceToWorld(pos-eps.yxy).x,
+            distanceToWorld(pos+eps.yyx).x - distanceToWorld(pos-eps.yyx).x ));
 }
 
+const float shadowOffset = 0.01;
 /*
 Computes the intensity of lighting coming directly from the sun at a given point
 */
 float directLightingAtPoint(vec3 point) {
-    if (intersectionAlongRay(point, -sunDir, MAX_DIST) <= 0.0) {
-        return 1.0 * dot(-sunDir, worldNormal(point));
+    vec3 normal = calcNormal(point);
+    point += normal * shadowOffset;
+    if (intersectionAlongRay(point, -sunDir, MAX_DIST) >= 1.0) {
+        return 0.0;
     }
-    return 0.0;
+    return 1.0 * clamp(dot(-sunDir, normal), 0.0, 1.0);
 }
 
 vec3 skyboxColorInDirection(vec3 direction) {
@@ -98,7 +124,60 @@ float random(vec2 st) {
     return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
 }
 
-const int SAMPLES = 4;
+/*
+1 if there is a voxel, 0 otherwise
+*/
+bool voxelVolume(ivec3 voxel) {
+    if (voxel.x < 0 || voxel.y < 0 || voxel.z < 0)
+        return false;
+    return (voxel.x + voxel.y + voxel.z) % 2 == 0;
+}
+
+/*
+xyz: normal at intersection
+w:   distance to intersection
+*/
+vec4 distanceToVoxelAlongRay(vec3 origin, vec3 endpoint, float maxlen) {
+    const vec3 direction = normalize(endpoint - origin);
+    const vec3 rayAxesDirections = sign(direction);
+    float distanceTraveled = 0.0;
+    vec3 curPos = origin;
+    for (int i = 0; i < MAX_STEPS && distanceTraveled < maxlen; i++) {
+        // For each axis, coordinate of the next plane we will reach
+        // (try trunc(curPos + sign * 0.99), or round(curPos + sign * 0.5))
+        vec3 nextPlaneCoords = trunc(curPos + rayAxesDirections * 0.999999);
+        /*vec3(rayAxesDirections.x > 0.0 ? ceil(curPos.x) : floor(curPos.x),
+                                    rayAxesDirections.y > 0.0 ? ceil(curPos.y) : floor(curPos.y),
+                                    rayAxesDirections.z > 0.0 ? ceil(curPos.z) : floor(curPos.z));*/
+        // For each axis, the distance along direction to the next plane we will reach
+        // (any zeros in direction are handled here - they should become INF)
+        vec3 nextPlaneDistances = abs((nextPlaneCoords - curPos) / direction);
+        // Find the minimum of these, so we just travel far enough to get to the next plane intersection (we don't want to skip any voxels!)
+        float minPlaneDistance = min(nextPlaneDistances.x, 
+                                     min(nextPlaneDistances.y, nextPlaneDistances.z));
+        // Travel that minimum distance to the next plane
+        if (nextPlaneDistances.x == minPlaneDistance) {
+            distanceTraveled += nextPlaneDistances.x;
+            curPos = origin + direction * distanceTraveled;
+            curPos.x = round(curPos.x);
+        } else if (nextPlaneDistances.y == minPlaneDistance) {
+            distanceTraveled += nextPlaneDistances.y;
+            curPos = origin + direction * distanceTraveled;
+            curPos.y = round(curPos.y);
+        } else {
+            distanceTraveled += nextPlaneDistances.z;
+            curPos = origin + direction * distanceTraveled;
+            curPos.z = round(curPos.z);
+        }
+        // We should now be intersecting a plane - is there a voxel face at that intersection?
+        if (voxelVolume(ivec3(curPos))) {
+            return vec4(vec3(0.0, 0.0, 1.0), distanceTraveled);
+        }
+    }
+    return vec4(-1.0);
+}
+
+const int SAMPLES = 1;
 
 layout (local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
 
@@ -138,8 +217,8 @@ void main() {
     for (int i = 0; i < SAMPLES; i++) {
         vec3 randomOffset = camera.right * random(vec2(pixel.x + i, pixel.y)) - camera.up * random(vec2(pixel.x, pixel.y + i));
         vec3 curSampleDirection = rayDirection + randomOffset * pixelSize;
-        vec4 curSample = distanceToWorldAlongRay(rayOrigin, curSampleDirection, MAX_DIST);
-        outputColor += curSample.w >= 0.0 ? vec3(0.5) * directLightingAtPoint(curSample.xyz) : skyboxColorInDirection(curSampleDirection);
+        vec4 curSample = distanceToVoxelAlongRay(rayOrigin, curSampleDirection, MAX_DIST);
+        outputColor += vec3(curSample.w / MAX_DIST);// >= 0.0 ? vec3(curSample.w) : skyboxColorInDirection(curSampleDirection);
     }
     outputColor /= float(SAMPLES);
     outputColor = vec3(pow(outputColor.x, 0.45), pow(outputColor.y, 0.45), pow(outputColor.z, 0.45));

@@ -101,6 +101,7 @@ struct UniformBufferObject {
 
 const uint32_t WIDTH = 1024;
 const uint32_t HEIGHT = 768;
+const uint32_t RENDER_SCALE = 1;
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
@@ -768,7 +769,7 @@ private:
         renderImagesMemory.resize(MAX_FRAMES_IN_FLIGHT);
 
         for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            createImage(swapChainExtent.width / 2, swapChainExtent.height / 2, VK_FORMAT_R8G8B8A8_UNORM,
+            createImage(swapChainExtent.width / RENDER_SCALE, swapChainExtent.height / RENDER_SCALE, VK_FORMAT_R8G8B8A8_UNORM,
                         VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, renderImages[i], renderImagesMemory[i]);
             transitionImageLayout(renderImages[i], VK_FORMAT_R8G8B8A8_UNORM,
