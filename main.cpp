@@ -27,7 +27,7 @@
 #include <vulkan/vk_enum_string_helper.h>
 
 struct Camera {
-    alignas(16) glm::vec3 position = glm::vec3(0, 0, 7);
+    alignas(16) glm::vec3 position = glm::vec3(0, 0, 1.5);
     alignas(16) glm::vec3 forward = glm::vec3(1, 0, 0);
     alignas(16) glm::vec3 up = glm::vec3(0, 0, 1);
     alignas(16) glm::vec3 right = glm::vec3(0, 1, 0);

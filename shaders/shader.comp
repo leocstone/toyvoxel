@@ -27,9 +27,11 @@ layout(std140, binding = 2) buffer VoxelChunkOut {
 };
 */
 
-const int SAMPLES = 1;
+const int SAMPLES = 4;
 const int MAX_STEPS = 64;
+const int MAX_BOUNCES = 10;
 const float MAX_DIST = 10000.0;
+const float VOXELS_PER_METER = 64.0;
 
 /*
 Copied from iq
@@ -83,7 +85,7 @@ w:   distance to intersection
 vec4 distanceToVoxelAlongRay(vec3 origin, vec3 direction, float maxlen) {
     const vec3 rayAxesDirections = sign(direction);
     vec3 curPos = origin;
-    curPos *= 8.0;
+    curPos *= VOXELS_PER_METER;
     float totalDist = 0.0;
     int i = 0;
     for (; i < MAX_STEPS && totalDist < maxlen; i++) {
@@ -128,7 +130,7 @@ vec4 distanceToVoxelAlongRay(vec3 origin, vec3 direction, float maxlen) {
         }
         // We should now be intersecting a plane - is there a voxel face at that intersection?
         if (voxelVolume(curVoxel)) {
-            return vec4(normal, totalDist /= 8.0);
+            return vec4(normal, totalDist /= VOXELS_PER_METER);
         }
     }
     return vec4(vec3(0.0), -1.0);
@@ -144,6 +146,29 @@ float directLightingAtPoint(vec3 point, vec3 normal, vec3 sunDir) {
         return 0.0;
     }
     return 1.0;// * clamp(dot(-sunDir, normal), 0.0, 1.0);
+}
+
+/*
+Computes the intensity of lighting reflecting off of other surfaces at a given point with given normal
+*/
+float indirectLightingAtPoint(vec3 point, vec3 normal, vec3 sunDir) {
+    for (int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
+        // Offset the normal by a small amount
+        const float diffuse = 0.4;
+        vec3 dirMask = vec3(normal.x != 0 ? 0.0 : diffuse, normal.y != 0 ? 0.0 : diffuse, normal.z != 0 ? 0.0 : diffuse);
+        vec3 randomOffset = vec3(random(vec2(point.z + bounce, point.y + bounce)), 
+                                 random(vec2(point.x + bounce, point.z + bounce)), 
+                                 random(vec2(point.y + bounce, point.x + bounce))) * dirMask;
+        vec3 curDirection = normalize(normal + randomOffset);
+        vec4 curBounce = distanceToVoxelAlongRay(point, curDirection, MAX_DIST);
+        if (curBounce.w >= 0.0) {
+            point += curBounce.w * curDirection;
+            normal = curBounce.xyz;
+        } else {
+            return 1.0 / float(bounce + 2);   
+        }
+    }
+    return 0.0;
 }
 
 /*
@@ -201,7 +226,9 @@ void main() {
         vec3 curSampleDirection = rayDirection + randomOffset * pixelSize;
         curSampleDirection = normalize(curSampleDirection - camera.position);
         vec4 curSample = distanceToVoxelAlongRay(rayOrigin, curSampleDirection, MAX_DIST);
-        outputColor += curSample.w > 0.0 ? prettierNormalColor(curSample.xyz) * directLightingAtPoint(camera.position + curSampleDirection * curSample.w, curSample.xyz, sunDirection) : vec3(1.0);
+        outputColor += curSample.w > 0.0 ? prettierNormalColor(curSample.xyz) 
+                                            * (directLightingAtPoint(camera.position + curSampleDirection * curSample.w, curSample.xyz, sunDirection) * 0.5
+                                             + indirectLightingAtPoint(camera.position + curSampleDirection * curSample.w, curSample.xyz, sunDirection) * 0.5) : vec3(1.0);
     }
     outputColor /= float(SAMPLES);
     //outputColor = vec3(pow(outputColor.x, 0.45), pow(outputColor.y, 0.45), pow(outputColor.z, 0.45));
