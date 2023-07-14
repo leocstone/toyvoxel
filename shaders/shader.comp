@@ -3,11 +3,12 @@
 const int CHUNK_SIZE_METERS = 16;
 const int CHUNK_HEIGHT_METERS = 256;
 const int VOXELS_PER_METER = 8;
-/*
+const int CHUNK_SIZE_VOXELS = CHUNK_SIZE_METERS * VOXELS_PER_METER;
+const int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
+
 struct VoxelChunk {
-    uint voxels[CHUNK_WIDTH][CHUNK_WIDTH][CHUNK_HEIGHT];
+    int voxels[CHUNK_SIZE_VOXELS][CHUNK_SIZE_VOXELS][CHUNK_HEIGHT_VOXELS];
 };
-*/
 
 layout(binding = 0) uniform Camera {
     vec3 position;
@@ -18,18 +19,13 @@ layout(binding = 0) uniform Camera {
 } camera;
 
 layout(binding = 1, rgba8) uniform writeonly image2D outputImage;
-/*
-layout(std140, binding = 1) readonly buffer VoxelChunkIn {
+
+layout(std430, binding = 2) readonly buffer VoxelChunkIn {
     VoxelChunk chunkIn;
 };
 
-layout(std140, binding = 2) buffer VoxelChunkOut {
-    VoxelChunk chunkOut;
-};
-*/
-
 const int SAMPLES = 1;
-const int MAX_STEPS = 128;
+const int MAX_STEPS = CHUNK_SIZE_VOXELS;
 const int MAX_BOUNCES = 1;
 const float MAX_DIST = 10000.0;
 
@@ -55,6 +51,17 @@ bool voxelVolume(ivec3 voxel) {
     if (voxel.z > 50)
         return false;
     return (voxel.x + voxel.y + voxel.z) % 2 == 0;
+}
+
+/*
+Wrapper around array to prevent invalid access
+*/
+bool getVoxel(ivec3 voxel) {
+    if (voxel.x < 0 || voxel.y < 0 || voxel.z < 0)
+        return false;
+    if (voxel.x > CHUNK_SIZE_VOXELS || voxel.y > CHUNK_SIZE_VOXELS || voxel.z > CHUNK_HEIGHT_VOXELS)
+        return false;
+    return chunkIn.voxels[voxel.x][voxel.y][voxel.z] != 0;
 }
 
 const float eps = 0.1;
@@ -110,7 +117,7 @@ vec4 distanceToVoxelAlongRay(vec3 origin, vec3 direction, float maxlen) {
             normal.z = -rayAxesDirections.z;
         }
         // We should now be intersecting a plane - is there a voxel face at that intersection?
-        if (voxelVolume(curVoxel)) {
+        if (getVoxel(curVoxel)) {
             return vec4(normal, totalDist /= VOXELS_PER_METER);
         }
     }

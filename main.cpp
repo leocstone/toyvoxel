@@ -92,7 +92,7 @@ struct UniformBufferObject {
 
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
-const uint32_t RENDER_SCALE = 4;
+const uint32_t RENDER_SCALE = 2;
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
@@ -176,9 +176,6 @@ private:
     VkBuffer indexBuffer;
     VkDeviceMemory indexBufferMemory;
 
-    std::vector<VkBuffer> voxelBuffers;
-    std::vector<VkDeviceMemory> voxelBuffersMemory;
-
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBuffersMemory;
     std::vector<void*> uniformBuffersMapped;
@@ -202,6 +199,9 @@ private:
     std::vector<VkBuffer> computeUniformBuffers;
     std::vector<VkDeviceMemory> computeUniformsMemory;
     std::vector<void*> computeUniformsMapped;
+
+    std::vector<VkBuffer> voxelBuffers;
+    std::vector<VkDeviceMemory> voxelBuffersMemory;
 
     /* Camera */
     Camera camera;
@@ -321,11 +321,13 @@ private:
     }
 
     void createComputeDescriptorPool() {
-        std::array<VkDescriptorPoolSize, 2> poolSizes {};
+        std::array<VkDescriptorPoolSize, 3> poolSizes {};
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
         poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
         VkDescriptorPoolCreateInfo poolInfo {};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -366,7 +368,12 @@ private:
             outputImageInfo.imageView = renderImageViews[i];
             outputImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-            std::array<VkWriteDescriptorSet, 2> descriptorWrites {};
+            VkDescriptorBufferInfo voxelBufferInfo {};
+            voxelBufferInfo.buffer = voxelBuffers[i];
+            voxelBufferInfo.offset = 0;
+            voxelBufferInfo.range = sizeof(VoxelChunk);
+
+            std::array<VkWriteDescriptorSet, 3> descriptorWrites {};
 
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstSet = computeDescriptorSets[i];
@@ -383,6 +390,14 @@ private:
             descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             descriptorWrites[1].descriptorCount = 1;
             descriptorWrites[1].pImageInfo = &outputImageInfo;
+
+            descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[2].dstSet = computeDescriptorSets[i];
+            descriptorWrites[2].dstBinding = 2;
+            descriptorWrites[2].dstArrayElement = 0;
+            descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            descriptorWrites[2].descriptorCount = 1;
+            descriptorWrites[2].pBufferInfo = &voxelBufferInfo;
 
             vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                    descriptorWrites.data(), 0, nullptr);
@@ -430,7 +445,7 @@ private:
     }
 
     void createComputeDescriptorSetLayout() {
-        std::array<VkDescriptorSetLayoutBinding, 2> layoutBindings {};
+        std::array<VkDescriptorSetLayoutBinding, 3> layoutBindings {};
         layoutBindings[0].binding = 0;
         layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         layoutBindings[0].descriptorCount = 1;
@@ -442,6 +457,12 @@ private:
         layoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         layoutBindings[1].pImmutableSamplers = nullptr;
         layoutBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        layoutBindings[2].binding = 2;
+        layoutBindings[2].descriptorCount = 1;
+        layoutBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        layoutBindings[2].pImmutableSamplers = nullptr;
+        layoutBindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
         VkDescriptorSetLayoutCreateInfo layoutInfo {};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -544,6 +565,18 @@ private:
         vkCmdCopyBufferToImage(commandBuffer, buffer, image,
                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
+        endSingleTimeCommands(commandBuffer);
+    }
+
+    void copyBufferToBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize sz) {
+        VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+        VkBufferCopy bufferCopy {};
+        bufferCopy.srcOffset = 0;
+        bufferCopy.dstOffset = 0;
+        bufferCopy.size = sz;
+
+        vkCmdCopyBuffer(commandBuffer, src, dst, 1, &bufferCopy);
         endSingleTimeCommands(commandBuffer);
     }
 
@@ -778,16 +811,18 @@ private:
 
     void createVoxelBuffers() {
         std::cout << "Creating a voxel buffer of size " << sizeof(VoxelChunk) << std::endl;
-        VoxelChunk* chunk = new VoxelChunk();
+        VoxelChunk* chunk = WorldGenerator::generateChunk();
 
-        for(int x = 0; x < CHUNK_WIDTH_METERS * VOXELS_PER_METER; x++) {
-            for(int y = 0; y < CHUNK_WIDTH_METERS * VOXELS_PER_METER; y++) {
-                for(int z = 0; z < CHUNK_HEIGHT_METERS * VOXELS_PER_METER; z++) {
-                    chunk->voxels[x][y][z] = (x + y + z) % 2;
-                }
-            }
-        }
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(sizeof(VoxelChunk), VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, sizeof(VoxelChunk), 0, &data);
+            memcpy(data, chunk->voxels, sizeof(VoxelChunk));
+        vkUnmapMemory(device, stagingBufferMemory);
+        delete chunk;
 
         voxelBuffers.resize(MAX_FRAMES_IN_FLIGHT);
         voxelBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
@@ -797,8 +832,11 @@ private:
                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, voxelBuffers[i],
                                     voxelBuffersMemory[i]);
+            copyBuffer(stagingBuffer, voxelBuffers[i], sizeof(VoxelChunk));
         }
-        delete chunk;
+
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 
     void createDescriptorSets() {
