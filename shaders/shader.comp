@@ -1,7 +1,8 @@
 #version 450
 
-const int CHUNK_SIZE = 16;
-const int CHUNK_HEIGHT = 384;
+const int CHUNK_SIZE_METERS = 16;
+const int CHUNK_HEIGHT_METERS = 256;
+const int VOXELS_PER_METER = 8;
 /*
 struct VoxelChunk {
     uint voxels[CHUNK_WIDTH][CHUNK_WIDTH][CHUNK_HEIGHT];
@@ -27,36 +28,10 @@ layout(std140, binding = 2) buffer VoxelChunkOut {
 };
 */
 
-const int SAMPLES = 4;
-const int MAX_STEPS = 64;
-const int MAX_BOUNCES = 10;
+const int SAMPLES = 1;
+const int MAX_STEPS = 128;
+const int MAX_BOUNCES = 1;
 const float MAX_DIST = 10000.0;
-const float VOXELS_PER_METER = 64.0;
-
-/*
-Copied from iq
-*/
-float sdBox( vec3 p, vec3 b )
-{
-  vec3 q = abs(p) - b;
-  return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
-}
-
-float sdBoxFrame( vec3 p, vec3 b, float e )
-{
-       p = abs(p  )-b;
-  vec3 q = abs(p+e)-e;
-  return min(min(
-      length(max(vec3(p.x,q.y,q.z),0.0))+min(max(p.x,max(q.y,q.z)),0.0),
-      length(max(vec3(q.x,p.y,q.z),0.0))+min(max(q.x,max(p.y,q.z)),0.0)),
-      length(max(vec3(q.x,q.y,p.z),0.0))+min(max(q.x,max(q.y,p.z)),0.0));
-}
-
-float sdPlane( vec3 p, vec3 n, float h )
-{
-  // n must be normalized
-  return dot(p,n) + h;
-}
 
 vec3 skyboxColorInDirection(vec3 direction) {
     return vec3(0.42, 0.69, 0.92);
@@ -71,6 +46,12 @@ float random(vec2 st) {
 1 if there is a voxel, 0 otherwise
 */
 bool voxelVolume(ivec3 voxel) {
+    if (voxel.z > 58)
+        return false;
+    if (voxel.x >= 10 && voxel.x <= 20)
+        return true;
+    if (voxel.y >= 10 && voxel.y <= 20)
+        return true;
     if (voxel.z > 50)
         return false;
     return (voxel.x + voxel.y + voxel.z) % 2 == 0;
@@ -202,7 +183,7 @@ void main() {
         return;
     }
     
-    vec3 sunDirection = normalize(vec3(0.5 * sin(camera.time) + 1, 0.5 * cos(camera.time) + 1, 0.5 * sin(camera.time) - 1));
+    vec3 sunDirection = normalize(vec3(0.1 * sin(camera.time) + 1, 0.1 * cos(camera.time) + 1, 0.1 * sin(camera.time) - 1));
 
     const vec2 pixel = vec2(gl_GlobalInvocationID.xy);
     const vec2 pixelDimensions = vec2(sz);
@@ -222,7 +203,7 @@ void main() {
     
     vec3 outputColor = vec3(0.0);
     for (int i = 0; i < SAMPLES; i++) {
-        vec3 randomOffset = camera.right * random(vec2(pixel.x + i, pixel.y)) - camera.up * random(vec2(pixel.x, pixel.y + i));
+        vec3 randomOffset = camera.right * random(vec2(pixel.x + i + camera.time, pixel.y + camera.time)) - camera.up * random(vec2(pixel.x + camera.time, pixel.y + i + camera.time));
         vec3 curSampleDirection = rayDirection + randomOffset * pixelSize;
         curSampleDirection = normalize(curSampleDirection - camera.position);
         vec4 curSample = distanceToVoxelAlongRay(rayOrigin, curSampleDirection, MAX_DIST);

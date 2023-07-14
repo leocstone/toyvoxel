@@ -14,7 +14,6 @@
 #include <vector>
 #include <optional>
 #include <set>
-#include <cstdint>
 #include <limits>
 #include <algorithm>
 #include <fstream>
@@ -26,8 +25,10 @@
 
 #include <vulkan/vk_enum_string_helper.h>
 
+#include "worldgenerator.h"
+
 struct Camera {
-    alignas(16) glm::vec3 position = glm::vec3(0, 0, 1.5);
+    alignas(16) glm::vec3 position = glm::vec3(0, 0, 7);
     alignas(16) glm::vec3 forward = glm::vec3(1, 0, 0);
     alignas(16) glm::vec3 up = glm::vec3(0, 0, 1);
     alignas(16) glm::vec3 right = glm::vec3(0, 1, 0);
@@ -83,17 +84,6 @@ const std::vector<uint16_t> indices = {
     0, 1, 2, 2, 3, 0
 };
 
-typedef uint32_t Voxel;
-
-// A chunk is 16x16 voxels XY
-constexpr int CHUNK_WIDTH = 16;
-// and 384 voxels tall
-constexpr int CHUNK_HEIGHT = 384;
-
-struct VoxelChunk {
-    Voxel voxels[CHUNK_WIDTH][CHUNK_WIDTH][CHUNK_HEIGHT];
-};
-
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
@@ -102,7 +92,7 @@ struct UniformBufferObject {
 
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
-const uint32_t RENDER_SCALE = 2;
+const uint32_t RENDER_SCALE = 4;
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
@@ -787,27 +777,28 @@ private:
     }
 
     void createVoxelBuffers() {
-        VoxelChunk chunk {};
+        std::cout << "Creating a voxel buffer of size " << sizeof(VoxelChunk) << std::endl;
+        VoxelChunk* chunk = new VoxelChunk();
 
-        for(int x = 0; x < CHUNK_WIDTH; x++) {
-            for(int y = 0; y < CHUNK_WIDTH; y++) {
-                for(int z = 0; z < CHUNK_HEIGHT; z++) {
-                    chunk.voxels[x][y][z] = (x + y + z) % 2;
+        for(int x = 0; x < CHUNK_WIDTH_METERS * VOXELS_PER_METER; x++) {
+            for(int y = 0; y < CHUNK_WIDTH_METERS * VOXELS_PER_METER; y++) {
+                for(int z = 0; z < CHUNK_HEIGHT_METERS * VOXELS_PER_METER; z++) {
+                    chunk->voxels[x][y][z] = (x + y + z) % 2;
                 }
             }
         }
+
 
         voxelBuffers.resize(MAX_FRAMES_IN_FLIGHT);
         voxelBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
 
         for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            createBuffer(sizeof(chunk), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            createBuffer(sizeof(VoxelChunk), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, voxelBuffers[i],
                                     voxelBuffersMemory[i]);
         }
-
-
+        delete chunk;
     }
 
     void createDescriptorSets() {
@@ -1977,7 +1968,7 @@ private:
 
         /* Graphics pipeline block */
         // Update uniform buffer
-        updateUniformBuffer(currentFrame);
+        //updateUniformBuffer(currentFrame);
 
         // Record command buffer with the image we just got
         vkResetCommandBuffer(commandBuffers[currentFrame], 0);
