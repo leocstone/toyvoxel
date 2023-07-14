@@ -27,10 +27,11 @@
 #include <vulkan/vk_enum_string_helper.h>
 
 struct Camera {
-    alignas(16) glm::vec3 position = glm::vec3(-1, 0, 0);
+    alignas(16) glm::vec3 position = glm::vec3(0, 0, 7);
     alignas(16) glm::vec3 forward = glm::vec3(1, 0, 0);
     alignas(16) glm::vec3 up = glm::vec3(0, 0, 1);
     alignas(16) glm::vec3 right = glm::vec3(0, 1, 0);
+    alignas(4) float cur_time = 0.0f;
 };
 
 struct Vertex {
@@ -1881,6 +1882,7 @@ private:
     void drawFrame() {
         auto currentTime = std::chrono::high_resolution_clock::now();
         float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastFrameStart).count();
+        camera.cur_time += deltaTime;
         lastFrameStart = std::chrono::high_resolution_clock::now();
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
         uint32_t imageIndex;
