@@ -11,7 +11,7 @@ bits 30-0: voxel ID or distance to nearest voxel (in voxels)
 typedef int32_t Voxel;
 
 // A chunk is 16x16 meters XY
-constexpr int CHUNK_WIDTH_METERS = 16;
+constexpr int CHUNK_WIDTH_METERS = 32;
 // and 256 meters tall
 constexpr int CHUNK_HEIGHT_METERS = 256;
 // There are 8 voxels in 1 meter

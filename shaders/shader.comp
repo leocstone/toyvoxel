@@ -1,6 +1,6 @@
 #version 450
 
-const int CHUNK_SIZE_METERS = 16;
+const int CHUNK_SIZE_METERS = 32;
 const int CHUNK_HEIGHT_METERS = 256;
 const int VOXELS_PER_METER = 8;
 const int CHUNK_SIZE_VOXELS = CHUNK_SIZE_METERS * VOXELS_PER_METER;
@@ -25,8 +25,8 @@ layout(std430, binding = 2) readonly buffer VoxelChunkIn {
 };
 
 const int SAMPLES = 1;
-const int MAX_STEPS = CHUNK_SIZE_VOXELS * 4;
-const int MAX_BOUNCES = 3;
+const int MAX_STEPS = CHUNK_HEIGHT_VOXELS;
+const int MAX_BOUNCES = 16;
 const float MAX_DIST = 10000.0;
 
 vec3 skyboxColorInDirection(vec3 direction) {
@@ -154,7 +154,7 @@ Computes the intensity of lighting reflecting off of other surfaces at a given p
 float indirectLightingAtPoint(vec3 point, vec3 normal, vec3 sunDir) {
     for (int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
         // Offset the normal by a small amount
-        const float diffuse = 0.4;
+        const float diffuse = 1.0;
         vec3 dirMask = vec3(normal.x != 0 ? 0.0 : diffuse, normal.y != 0 ? 0.0 : diffuse, normal.z != 0 ? 0.0 : diffuse);
         vec3 randomOffset = vec3(random(vec2(point.z + bounce, point.y + bounce)), 
                                  random(vec2(point.x + bounce, point.z + bounce)), 
@@ -226,7 +226,7 @@ void main() {
         vec3 curSampleDirection = rayDirection + randomOffset * pixelSize;
         curSampleDirection = normalize(curSampleDirection - camera.position);
         vec4 curSample = distanceToVoxelAlongRay(rayOrigin, curSampleDirection, MAX_DIST);
-        outputColor += curSample.w > 0.0 ? prettierNormalColor(curSample.xyz) 
+        outputColor += curSample.w > 0.0 ? prettierNormalColor(curSample.xyz)
                                             * (directLightingAtPoint(camera.position + curSampleDirection * curSample.w, curSample.xyz, sunDirection) * 0.5
                                              + indirectLightingAtPoint(camera.position + curSampleDirection * curSample.w, curSample.xyz, sunDirection) * 0.5) : vec3(1.0);
     }

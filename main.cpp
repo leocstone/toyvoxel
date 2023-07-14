@@ -28,7 +28,7 @@
 #include "worldgenerator.h"
 
 struct Camera {
-    alignas(16) glm::vec3 position = glm::vec3(0, 0, 7);
+    alignas(16) glm::vec3 position = glm::vec3(0, 0, 50);
     alignas(16) glm::vec3 forward = glm::vec3(0, 1, 0);
     alignas(16) glm::vec3 up = glm::vec3(0, 0, 1);
     alignas(16) glm::vec3 right = glm::vec3(1, 0, 0);
@@ -92,7 +92,7 @@ struct UniformBufferObject {
 
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
-const uint32_t RENDER_SCALE = 1;
+const uint32_t RENDER_SCALE = 2;
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
@@ -1958,6 +1958,7 @@ private:
 
         /* Camera position */
         glm::vec3 moveDirection(0, 0, 0);
+        float moveSpeed = 1.0;
         if (keyPressed[GLFW_KEY_W])
             moveDirection += camera.forward;
         if (keyPressed[GLFW_KEY_S])
@@ -1966,7 +1967,9 @@ private:
             moveDirection += camera.right;
         if (keyPressed[GLFW_KEY_D])
             moveDirection -= camera.right;
-        camera.position += moveDirection * deltaTime;
+        if (keyPressed[GLFW_KEY_LEFT_SHIFT])
+            moveSpeed = 10.0f;
+        camera.position += moveDirection * deltaTime * moveSpeed;
         /*
         std::cout << "deltaTime: " << deltaTime << std::endl;
         std::cout << "Camera: " << camera.position.x << ", " << camera.position.y << ", " << camera.position.z << std::endl;
