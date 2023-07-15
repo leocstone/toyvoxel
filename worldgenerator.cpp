@@ -111,8 +111,10 @@ static void computeDistances(VoxelChunk* chunkIn) {
                 }
             }
         }
-        std::cout << x + 1 << " / " << CHUNK_WIDTH_METERS * VOXELS_PER_METER << std::endl;
+        std::cout << "\r" << x + 1 << " / " << CHUNK_WIDTH_METERS * VOXELS_PER_METER;
+        std::cout.flush();
     }
+    std::cout << std::endl;
 }
 
 static VoxelChunk* basicPerlinTest() {
@@ -135,7 +137,86 @@ static VoxelChunk* basicPerlinTest() {
             }
         }
     }
-    computeDistances(result);
+
+    return result;
+}
+
+static VoxelChunk* erosionTest() {
+    VoxelChunk* result = new VoxelChunk();
+
+    /* Simple 2d perlin as heightmap */
+    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
+        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
+            for (int z = 0; z < CHUNK_HEIGHT_VOXELS; z++) {
+                constexpr double scale_factor = 32.0;
+                double height = Perlin::perlin(double(x) / scale_factor, double(y) / scale_factor, 55.0) * VOXELS_PER_METER * 14.0;
+                int voxel = (z <= height) ? -3 : 0;
+                result->setVoxel(x, y, z, voxel);
+            }
+        }
+    }
+
+    /* Erode */
+    constexpr int EROSION_ITERATIONS = CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * 64;
+    std::uniform_int_distribution<int> randomPosition(0, CHUNK_WIDTH_VOXELS);
+    std::uniform_int_distribution<int> randomDirection(0, 3);
+    std::cout << "Erosion simulation starting." << std::endl;
+    for (int iteration = 0; iteration < EROSION_ITERATIONS; iteration++) {
+        int curX = randomPosition(rng);
+        int curY = randomPosition(rng);
+
+        // Droplet starts at top of world
+        int height = CHUNK_HEIGHT_VOXELS - 1;
+        int carriedVoxel = 0;
+        /* Pick up carried voxel */
+        while (height > 0 && (result->getVoxel(curX, curY, height) == 0)) {
+            height--;
+        }
+        carriedVoxel = result->getVoxel(curX, curY, height);
+        result->setVoxel(curX, curY, height, 0);
+        if (carriedVoxel == 0)
+            continue;
+        // Trace the path of the droplet from impact point
+        float energy = 1.0f; // Droplet starts at terminal velocity (1)
+        while (energy > 0.0f) {
+            /* First, check for falling down (no energy) */
+            while (height > 0 && (result->getVoxel(curX, curY, height - 1) == 0)) {
+                height--;
+            }
+
+            /* Check to move sideways and use energy */
+            /* 1: +x 2: -x 3: +y 4: -y */
+            int curRandDirections[4][2] = {{1, 0},{-1, 0},{0, 1},{0, -1}};
+            /* Shuffle the directions so we are guaranteed to get one of each in any given 4 samples */
+            constexpr int swaps = 4;
+            for (int s = 0; s < swaps; s++) {
+                int idx1 = randomDirection(rng);
+                int idx2 = randomDirection(rng);
+                int tmp[2] = {curRandDirections[idx2][0], curRandDirections[idx2][1]};
+                curRandDirections[idx2][0] = curRandDirections[idx1][0];
+                curRandDirections[idx2][1] = curRandDirections[idx1][1];
+                curRandDirections[idx1][0] = tmp[0];
+                curRandDirections[idx1][1] = tmp[1];
+            }
+            bool madeMove = false;
+            for (int i = 0; i < 4 && (!madeMove); i++) {
+                int sampledX = curX + curRandDirections[i][0];
+                int sampledY = curY + curRandDirections[i][1];
+                if ((sampledX >= 0 && sampledX < CHUNK_WIDTH_VOXELS) && (sampledY >= 0 && sampledY < CHUNK_WIDTH_VOXELS)) {
+                    if (result->getVoxel(sampledX, sampledY, height) == 0) {
+                        curX = sampledX;
+                        curY = sampledY;
+                        energy -= 0.1f;
+                        madeMove = true;
+                    }
+                }
+            }
+            if (!madeMove)
+                break;
+        }
+        result->setVoxel(curX, curY, height, carriedVoxel);
+    }
+    std::cout << std::endl;
 
     return result;
 }
@@ -153,7 +234,6 @@ static VoxelChunk* axes() {
             }
         }
     }
-    //computeDistances(result);
 
     return result;
 }
@@ -165,7 +245,7 @@ static VoxelChunk* forestTest() {
 }
 
 VoxelChunk* WorldGenerator::generateChunk() {
-    VoxelChunk* result = basicPerlinTest();
-
+    VoxelChunk* result = erosionTest();
+    computeDistances(result);
     return result;
 }

@@ -1,7 +1,7 @@
 #version 450
 
-const int CHUNK_SIZE_METERS = 32;
-const int CHUNK_HEIGHT_METERS = 32;
+const int CHUNK_SIZE_METERS = 64;
+const int CHUNK_HEIGHT_METERS = 16;
 const int VOXELS_PER_METER = 8;
 const int CHUNK_SIZE_VOXELS = CHUNK_SIZE_METERS * VOXELS_PER_METER;
 const int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
@@ -26,7 +26,7 @@ layout(std430, binding = 2) readonly buffer VoxelChunkIn {
 };
 
 const int SAMPLES = 1;
-const int MAX_STEPS = CHUNK_HEIGHT_VOXELS * 2;
+const int MAX_STEPS = CHUNK_SIZE_VOXELS * 2;
 const int MAX_BOUNCES = 1;
 const float MAX_DIST = 10000.0;
 

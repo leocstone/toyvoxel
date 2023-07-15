@@ -93,7 +93,7 @@ struct UniformBufferObject {
 
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
-const uint32_t RENDER_SCALE = 3;
+const uint32_t RENDER_SCALE = 2;
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
