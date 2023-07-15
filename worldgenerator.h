@@ -1,6 +1,7 @@
 #ifndef WORLDGENERATOR_H
 #define WORLDGENERATOR_H
 #include <cstdint>
+#include <algorithm>
 #include "perlin.h"
 
 /*
@@ -11,9 +12,9 @@ bits 30-0: voxel ID or distance to nearest voxel (in voxels)
 typedef int32_t Voxel;
 
 // A chunk is 16x16 meters XY
-constexpr int CHUNK_WIDTH_METERS = 32;
+constexpr int CHUNK_WIDTH_METERS = 16;
 // and 256 meters tall
-constexpr int CHUNK_HEIGHT_METERS = 256;
+constexpr int CHUNK_HEIGHT_METERS = 64;
 // There are 8 voxels in 1 meter
 constexpr int VOXELS_PER_METER = 8;
 

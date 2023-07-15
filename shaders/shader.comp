@@ -1,7 +1,7 @@
 #version 450
 
-const int CHUNK_SIZE_METERS = 32;
-const int CHUNK_HEIGHT_METERS = 256;
+const int CHUNK_SIZE_METERS = 16;
+const int CHUNK_HEIGHT_METERS = 64;
 const int VOXELS_PER_METER = 8;
 const int CHUNK_SIZE_VOXELS = CHUNK_SIZE_METERS * VOXELS_PER_METER;
 const int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
@@ -16,6 +16,7 @@ layout(binding = 0) uniform Camera {
     vec3 up;
     vec3 right;
     float time;
+    vec3 sunDirection;
 } camera;
 
 layout(binding = 1, rgba8) uniform writeonly image2D outputImage;
@@ -25,8 +26,8 @@ layout(std430, binding = 2) readonly buffer VoxelChunkIn {
 };
 
 const int SAMPLES = 1;
-const int MAX_STEPS = CHUNK_HEIGHT_VOXELS;
-const int MAX_BOUNCES = 16;
+const int MAX_STEPS = CHUNK_SIZE_VOXELS;
+const int MAX_BOUNCES = 1;
 const float MAX_DIST = 10000.0;
 
 vec3 skyboxColorInDirection(vec3 direction) {
@@ -56,39 +57,49 @@ bool voxelVolume(ivec3 voxel) {
 /*
 Wrapper around array to prevent invalid access
 */
-bool getVoxel(ivec3 voxel) {
+int getVoxel(ivec3 voxel) {
     if (voxel.x < 0 || voxel.y < 0 || voxel.z < 0)
-        return false;
+        return 0;
     if (voxel.x > CHUNK_SIZE_VOXELS || voxel.y > CHUNK_SIZE_VOXELS || voxel.z > CHUNK_HEIGHT_VOXELS)
-        return false;
-    return chunkIn.voxels[voxel.x][voxel.y][voxel.z] != 0;
+        return 0;
+    return chunkIn.voxels[voxel.x][voxel.y][voxel.z];
 }
 
 const float eps = 0.1;
 
 /*
-xyz: normal at intersection
-w:   distance to intersection
+If dist < 0, no intersection
 */
-vec4 distanceToVoxelAlongRay(vec3 origin, vec3 direction, float maxlen) {
+struct VoxelIntersection {
+    float dist;
+    vec3 normal;
+    int id;
+    ivec3 idx;
+};
+
+/*
+Main voxel intersection function
+*/
+VoxelIntersection distanceToVoxelAlongRay(vec3 origin, vec3 direction, float maxlen) {
     const vec3 rayAxesDirections = sign(direction);
     vec3 curPos = origin;
     curPos *= VOXELS_PER_METER;
     float totalDist = 0.0;
     int i = 0;
     for (; i < MAX_STEPS && totalDist < maxlen; i++) {
-        if (curPos.x > CHUNK_SIZE_VOXELS && direction.x >= 0.0)
-            return vec4(vec3(0.0), -1.0);
-        if (curPos.x < 0.0 && direction.x <= 0.0)
-            return vec4(vec3(0.0), -1.0);
-        if (curPos.y > CHUNK_SIZE_VOXELS && direction.y >= 0.0)
-            return vec4(vec3(0.0), -1.0);
-        if (curPos.y < 0.0 && direction.y <= 0.0)
-            return vec4(vec3(0.0), -1.0);
-        if (curPos.z > CHUNK_HEIGHT_VOXELS && direction.z >= 0.0)
-            return vec4(vec3(0.0), -1.0);
-        if (curPos.z < 0.0 && direction.z <= 0.0)
-            return vec4(vec3(0.0), -1.0);
+        /* AABB check */
+        if (curPos.x > CHUNK_SIZE_VOXELS + 1.0 && direction.x >= 0.0)
+            return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
+        if (curPos.x < -1.0 && direction.x <= 0.0)
+            return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
+        if (curPos.y > CHUNK_SIZE_VOXELS + 1.0 && direction.y >= 0.0)
+            return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
+        if (curPos.y < -1.0 && direction.y <= 0.0)
+            return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
+        if (curPos.z > CHUNK_HEIGHT_VOXELS + 1.0 && direction.z >= 0.0)
+            return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
+        if (curPos.z < -1.0 && direction.z <= 0.0)
+            return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
         // For each axis, coordinate of the next plane we will reach
         vec3 nextPlaneCoords = vec3(0.0);
         nextPlaneCoords.x = rayAxesDirections.x >= 0.0 ? floor(curPos.x + 0.999999999) : ceil(curPos.x - 0.999999999);
@@ -129,11 +140,21 @@ vec4 distanceToVoxelAlongRay(vec3 origin, vec3 direction, float maxlen) {
             normal.z = -rayAxesDirections.z;
         }
         // We should now be intersecting a plane - is there a voxel face at that intersection?
-        if (getVoxel(curVoxel)) {
-            return vec4(normal, totalDist /= VOXELS_PER_METER);
+        int v = getVoxel(curVoxel);
+        /*
+        Value is the distance to closest voxel from any point in the voxel,
+        rounded down - if at least 2, we can skip some iterations
+        */
+        if (v > 1) {
+            curPos += float(v - 1) * direction;
+            totalDist += float(v - 1);
+        }
+        /* Value is voxel id */
+        else if (v < 0) {
+            return VoxelIntersection(totalDist / VOXELS_PER_METER, normal, v * -1, curVoxel);
         }
     }
-    return vec4(vec3(0.0), -1.0);
+    return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1));
 }
 
 const float shadowOffset = 0.00001;
@@ -142,7 +163,7 @@ Computes the intensity of lighting coming directly from the sun at a given point
 */
 float directLightingAtPoint(vec3 point, vec3 normal, vec3 sunDir) {
     point += normal * shadowOffset;
-    if (distanceToVoxelAlongRay(point, -sunDir, MAX_DIST).w >= 0.0) {
+    if (distanceToVoxelAlongRay(point, -sunDir, MAX_DIST).dist >= 0.0) {
         return 0.0;
     }
     return 1.0;// * clamp(dot(-sunDir, normal), 0.0, 1.0);
@@ -160,10 +181,10 @@ float indirectLightingAtPoint(vec3 point, vec3 normal, vec3 sunDir) {
                                  random(vec2(point.x + bounce, point.z + bounce)), 
                                  random(vec2(point.y + bounce, point.x + bounce))) * dirMask;
         vec3 curDirection = normalize(normal + randomOffset);
-        vec4 curBounce = distanceToVoxelAlongRay(point, curDirection, MAX_DIST);
-        if (curBounce.w >= 0.0) {
-            point += curBounce.w * curDirection;
-            normal = curBounce.xyz;
+        VoxelIntersection curBounce = distanceToVoxelAlongRay(point, curDirection, MAX_DIST);
+        if (curBounce.dist >= 0.0) {
+            point += curBounce.dist * curDirection;
+            normal = curBounce.normal;
         } else {
             return 1.0 / float(bounce + 2);   
         }
@@ -193,6 +214,38 @@ vec3 prettierNormalColor(vec3 normal) {
     return vec3(1.0, 0.0, 0.0);
 }
 
+/*
+Voxel color lookup table
+*/
+vec3 voxelColor(int idx) {
+    switch(idx) {
+    case 1: // Stone
+        return vec3(50.0, 54.0, 38.0) / 255.0;
+    case 2: // Dirt
+        return vec3(188.0, 108.0, 37.0) / 255.0;
+    case 3: // Grass
+        return vec3(96.0, 108.0, 56.0) / 255.0;
+    default:
+        return vec3(1.0, 0.0, 0.0);
+    }
+}
+
+/*
+Color variance strength lookup
+*/
+float voxelColorVariance(int idx) {
+    switch(idx) {
+    case 1: // Stone
+        return 0.01;
+    case 2: // Dirt
+        return 0.05;
+    case 3: // Grass
+        return 0.1;
+    default:
+        return 0.01;
+    }
+}
+
 layout (local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
 
 void main() {
@@ -201,8 +254,6 @@ void main() {
     if (gl_GlobalInvocationID.x > sz.x || gl_GlobalInvocationID.y > sz.y) {
         return;
     }
-    
-    vec3 sunDirection = normalize(vec3(0.1 * sin(camera.time) + 1, 0.1 * cos(camera.time) + 1, 0.1 * sin(camera.time) - 1));
 
     const vec2 pixel = vec2(gl_GlobalInvocationID.xy);
     const vec2 pixelDimensions = vec2(sz);
@@ -225,13 +276,13 @@ void main() {
         vec3 randomOffset = camera.right * random(vec2(pixel.x + i + camera.time, pixel.y + camera.time)) - camera.up * random(vec2(pixel.x + camera.time, pixel.y + i + camera.time));
         vec3 curSampleDirection = rayDirection + randomOffset * pixelSize;
         curSampleDirection = normalize(curSampleDirection - camera.position);
-        vec4 curSample = distanceToVoxelAlongRay(rayOrigin, curSampleDirection, MAX_DIST);
-        outputColor += curSample.w > 0.0 ? prettierNormalColor(curSample.xyz)
-                                            * (directLightingAtPoint(camera.position + curSampleDirection * curSample.w, curSample.xyz, sunDirection) * 0.5
-                                             + indirectLightingAtPoint(camera.position + curSampleDirection * curSample.w, curSample.xyz, sunDirection) * 0.5) : vec3(1.0);
+        VoxelIntersection curSample = distanceToVoxelAlongRay(rayOrigin, curSampleDirection, MAX_DIST);
+        outputColor += curSample.dist > 0.0 ? voxelColor(curSample.id) * (1.0 + (random(vec2(curSample.idx.x - curSample.idx.z, curSample.idx.y + curSample.idx.z)) - 0.5) * voxelColorVariance(curSample.id))
+                                           * (directLightingAtPoint(camera.position + curSampleDirection * curSample.dist, curSample.normal, camera.sunDirection) * 0.5
+                                             + indirectLightingAtPoint(camera.position + curSampleDirection * curSample.dist, curSample.normal, camera.sunDirection) * 0.5) : vec3(1.0);
     }
     outputColor /= float(SAMPLES);
     //outputColor = vec3(pow(outputColor.x, 0.45), pow(outputColor.y, 0.45), pow(outputColor.z, 0.45));
     
-    imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(outputColor.xyz, 1.0));
+    imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(outputColor, 1.0));
 }

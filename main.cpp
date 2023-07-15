@@ -33,6 +33,7 @@ struct Camera {
     alignas(16) glm::vec3 up = glm::vec3(0, 0, 1);
     alignas(16) glm::vec3 right = glm::vec3(1, 0, 0);
     alignas(4) float cur_time = 0.0f;
+    alignas(16) glm::vec3 sunDirection = glm::vec3(-1, -1, -1);
 };
 
 struct Vertex {
@@ -1152,7 +1153,7 @@ private:
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout,
                                 0, 1, &computeDescriptorSets[currentFrame], 0, nullptr);
 
-        vkCmdDispatch(commandBuffer, (swapChainExtent.width + 31) / 32, (swapChainExtent.height + 31) / 32, 1);
+        vkCmdDispatch(commandBuffer, ((swapChainExtent.width / RENDER_SCALE) + 31) / 32, ((swapChainExtent.height / RENDER_SCALE) + 31) / 32, 1);
 
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to record command buffer!");
@@ -1976,6 +1977,8 @@ private:
         std::cout << "W: " << keyPressed[GLFW_KEY_W] << " A: " << keyPressed[GLFW_KEY_A] << " S: " << keyPressed[GLFW_KEY_S] << " D: " << keyPressed[GLFW_KEY_D] << std::endl;
         */
         //std::cout << "x: " << cursorDeltaX << " y: " << cursorDeltaY << std::endl;
+        camera.sunDirection = glm::normalize(glm::vec3(0.1 * glm::sin(camera.cur_time) + 1, 0.1 * glm::cos(camera.cur_time) + 1, 0.1 * glm::sin(camera.cur_time) - 1));
+
         /* Compute shader block */
         memcpy(computeUniformsMapped[currentFrame], &camera, sizeof(camera));
 
