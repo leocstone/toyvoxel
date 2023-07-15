@@ -6,15 +6,16 @@
 
 /*
 Structure:
-bit 31: if 1, there is a voxel here. else, this is the number of voxels to the nearest voxel.
-bits 30-0: voxel ID or distance to nearest voxel (in voxels)
+if < 0, voxel id is value * -1
+if > 0, value is distance to nearest voxel
+if 0, there is no voxel here and no distance information
 */
 typedef int32_t Voxel;
 
 // A chunk is 16x16 meters XY
-constexpr int CHUNK_WIDTH_METERS = 16;
+constexpr int CHUNK_WIDTH_METERS = 32;
 // and 256 meters tall
-constexpr int CHUNK_HEIGHT_METERS = 64;
+constexpr int CHUNK_HEIGHT_METERS = 32;
 // There are 8 voxels in 1 meter
 constexpr int VOXELS_PER_METER = 8;
 
@@ -22,7 +23,13 @@ constexpr int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
 constexpr int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
 
 struct VoxelChunk {
-    alignas(4) Voxel voxels[CHUNK_WIDTH_METERS * VOXELS_PER_METER][CHUNK_WIDTH_METERS * VOXELS_PER_METER][CHUNK_HEIGHT_METERS * VOXELS_PER_METER];
+    Voxel voxels[CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * CHUNK_HEIGHT_VOXELS];
+    Voxel getVoxel(int x, int y, int z) {
+        return voxels[x + y * CHUNK_WIDTH_VOXELS + z * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS];
+    }
+    void setVoxel(int x, int y, int z, const Voxel& v) {
+        voxels[x + y * CHUNK_WIDTH_VOXELS + z * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS] = v;
+    }
 };
 
 class WorldGenerator

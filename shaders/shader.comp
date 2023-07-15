@@ -1,13 +1,13 @@
 #version 450
 
-const int CHUNK_SIZE_METERS = 16;
-const int CHUNK_HEIGHT_METERS = 64;
+const int CHUNK_SIZE_METERS = 32;
+const int CHUNK_HEIGHT_METERS = 32;
 const int VOXELS_PER_METER = 8;
 const int CHUNK_SIZE_VOXELS = CHUNK_SIZE_METERS * VOXELS_PER_METER;
 const int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
 
 struct VoxelChunk {
-    int voxels[CHUNK_SIZE_VOXELS][CHUNK_SIZE_VOXELS][CHUNK_HEIGHT_VOXELS];
+    int voxels[CHUNK_SIZE_VOXELS * CHUNK_SIZE_VOXELS * CHUNK_HEIGHT_VOXELS];
 };
 
 layout(binding = 0) uniform Camera {
@@ -26,7 +26,7 @@ layout(std430, binding = 2) readonly buffer VoxelChunkIn {
 };
 
 const int SAMPLES = 1;
-const int MAX_STEPS = CHUNK_SIZE_VOXELS;
+const int MAX_STEPS = CHUNK_HEIGHT_VOXELS * 2;
 const int MAX_BOUNCES = 1;
 const float MAX_DIST = 10000.0;
 
@@ -58,11 +58,14 @@ bool voxelVolume(ivec3 voxel) {
 Wrapper around array to prevent invalid access
 */
 int getVoxel(ivec3 voxel) {
-    if (voxel.x < 0 || voxel.y < 0 || voxel.z < 0)
+    if (voxel.x < 0 || voxel.y < 0 || voxel.z < 0 ||
+        voxel.x >= CHUNK_SIZE_VOXELS || voxel.y >= CHUNK_SIZE_VOXELS || voxel.z >= CHUNK_HEIGHT_VOXELS) {
         return 0;
-    if (voxel.x > CHUNK_SIZE_VOXELS || voxel.y > CHUNK_SIZE_VOXELS || voxel.z > CHUNK_HEIGHT_VOXELS)
-        return 0;
-    return chunkIn.voxels[voxel.x][voxel.y][voxel.z];
+        /* Return the maximum plane distance to the world bounds */
+        int xDist = 0;
+        int minDist = 0; /* TODO Replace giant if block to check for rays going out of world with getVoxel returning distance to world */
+    }
+    return chunkIn.voxels[voxel.x + voxel.y * CHUNK_SIZE_VOXELS + voxel.z * CHUNK_SIZE_VOXELS * CHUNK_SIZE_VOXELS];
 }
 
 const float eps = 0.1;
@@ -86,8 +89,28 @@ VoxelIntersection distanceToVoxelAlongRay(vec3 origin, vec3 direction, float max
     curPos *= VOXELS_PER_METER;
     float totalDist = 0.0;
     int i = 0;
+    /* Skip to world bounds */
+    /*
+    vec3 axisDistancesToWorldBounds = vec3(0.0, 0.0, 0.0);
+    if (curPos.x < 0.0 && direction.x > 0.0) {
+        axisDistancesToWorldBounds.x = abs(curPos.x) / direction.x;
+    } else if (curPos.x > CHUNK_SIZE_VOXELS && direction.x < 0.0) {
+        axisDistancesToWorldBounds.x = (curPos.x - CHUNK_SIZE_VOXELS) / direction.x;
+    }
+    if (curPos.y < 0.0 && direction.y > 0.0) {
+        axisDistancesToWorldBounds.y = abs(curPos.y) / direction.y;
+    } else if (curPos.y > CHUNK_SIZE_VOXELS && direction.y < 0.0) {
+        axisDistancesToWorldBounds.y = (curPos.y - CHUNK_SIZE_VOXELS) / direction.y;
+    }
+    if (curPos.z < 0.0 && direction.z > 0.0) {
+        axisDistancesToWorldBounds.z = abs(curPos.z) / direction.z;
+    } else if (curPos.z > CHUNK_HEIGHT_VOXELS && direction.z < 0.0) {
+        axisDistancesToWorldBounds.z = (curPos.z - CHUNK_HEIGHT_VOXELS) / direction.z;
+    }
+    curPos += (max(axisDistancesToWorldBounds.x, max(axisDistancesToWorldBounds.y, axisDistancesToWorldBounds.z)) * 0.975) * direction;
+    */
     for (; i < MAX_STEPS && totalDist < maxlen; i++) {
-        /* AABB check */
+        /* Exiting world bounds check */
         if (curPos.x > CHUNK_SIZE_VOXELS + 1.0 && direction.x >= 0.0)
             return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
         if (curPos.x < -1.0 && direction.x <= 0.0)
@@ -177,9 +200,9 @@ float indirectLightingAtPoint(vec3 point, vec3 normal, vec3 sunDir) {
         // Offset the normal by a small amount
         const float diffuse = 1.0;
         vec3 dirMask = vec3(normal.x != 0 ? 0.0 : diffuse, normal.y != 0 ? 0.0 : diffuse, normal.z != 0 ? 0.0 : diffuse);
-        vec3 randomOffset = vec3(random(vec2(point.z + bounce, point.y + bounce)), 
-                                 random(vec2(point.x + bounce, point.z + bounce)), 
-                                 random(vec2(point.y + bounce, point.x + bounce))) * dirMask;
+        vec3 randomOffset = vec3(random(vec2(point.z + point.x, point.y - point.x)),
+                                 random(vec2(point.x - point.z, point.z + point.y)),
+                                 random(vec2(point.y + point.z, point.x - point.y))) * dirMask;
         vec3 curDirection = normalize(normal + randomOffset);
         VoxelIntersection curBounce = distanceToVoxelAlongRay(point, curDirection, MAX_DIST);
         if (curBounce.dist >= 0.0) {
@@ -273,7 +296,7 @@ void main() {
     
     vec3 outputColor = vec3(0.0);
     for (int i = 0; i < SAMPLES; i++) {
-        vec3 randomOffset = camera.right * random(vec2(pixel.x + i + camera.time, pixel.y + camera.time)) - camera.up * random(vec2(pixel.x + camera.time, pixel.y + i + camera.time));
+        vec3 randomOffset = camera.right * random(vec2(pixel.x + i, pixel.y)) - camera.up * random(vec2(pixel.x, pixel.y + i));
         vec3 curSampleDirection = rayDirection + randomOffset * pixelSize;
         curSampleDirection = normalize(curSampleDirection - camera.position);
         VoxelIntersection curSample = distanceToVoxelAlongRay(rayOrigin, curSampleDirection, MAX_DIST);

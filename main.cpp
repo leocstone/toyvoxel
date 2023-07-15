@@ -28,7 +28,7 @@
 #include "worldgenerator.h"
 
 struct Camera {
-    alignas(16) glm::vec3 position = glm::vec3(0, 0, 50);
+    alignas(16) glm::vec3 position = glm::vec3(0, 0, 2);
     alignas(16) glm::vec3 forward = glm::vec3(0, 1, 0);
     alignas(16) glm::vec3 up = glm::vec3(0, 0, 1);
     alignas(16) glm::vec3 right = glm::vec3(1, 0, 0);
@@ -93,7 +93,7 @@ struct UniformBufferObject {
 
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
-const uint32_t RENDER_SCALE = 2;
+const uint32_t RENDER_SCALE = 3;
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
@@ -213,8 +213,8 @@ private:
     double cursorLastY;
     double cameraRotY = 0.0;
     double cameraRotZ = 0.0;
-    static constexpr double minPitch = -1.3;
-    static constexpr double maxPitch = 1.3;
+    static constexpr double minPitch = -1.5;
+    static constexpr double maxPitch = 1.5;
     static constexpr double sensitivity = 2.0;
     std::chrono::time_point<std::chrono::high_resolution_clock> lastFrameStart;
 
