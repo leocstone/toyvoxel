@@ -13,9 +13,9 @@ if 0, there is no voxel here and no distance information
 typedef int32_t Voxel;
 
 // A chunk is 16x16 meters XY
-constexpr int CHUNK_WIDTH_METERS = 64;
+constexpr int CHUNK_WIDTH_METERS = 48;
 // and 256 meters tall
-constexpr int CHUNK_HEIGHT_METERS = 16;
+constexpr int CHUNK_HEIGHT_METERS = 8;
 // There are 8 voxels in 1 meter
 constexpr int VOXELS_PER_METER = 8;
 

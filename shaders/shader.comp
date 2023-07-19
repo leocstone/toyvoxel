@@ -1,13 +1,13 @@
 #version 450
 
-const int CHUNK_SIZE_METERS = 64;
-const int CHUNK_HEIGHT_METERS = 16;
+const int CHUNK_WIDTH_METERS = 48;
+const int CHUNK_HEIGHT_METERS = 8;
 const int VOXELS_PER_METER = 8;
-const int CHUNK_SIZE_VOXELS = CHUNK_SIZE_METERS * VOXELS_PER_METER;
+const int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
 const int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
 
 struct VoxelChunk {
-    int voxels[CHUNK_SIZE_VOXELS * CHUNK_SIZE_VOXELS * CHUNK_HEIGHT_VOXELS];
+    int voxels[CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * CHUNK_HEIGHT_VOXELS];
 };
 
 layout(binding = 0) uniform Camera {
@@ -26,12 +26,12 @@ layout(std430, binding = 2) readonly buffer VoxelChunkIn {
 };
 
 const int SAMPLES = 1;
-const int MAX_STEPS = CHUNK_SIZE_VOXELS * 2;
+const int MAX_STEPS = CHUNK_WIDTH_VOXELS * 2;
 const int MAX_BOUNCES = 1;
 const float MAX_DIST = 10000.0;
 
 vec3 skyboxColorInDirection(vec3 direction) {
-    return vec3(0.42, 0.69, 0.92);
+    return vec3(1.0);
 }
 
 /* Copied from stackoverflow - random number in [0.0, 1.0] */
@@ -58,14 +58,13 @@ bool voxelVolume(ivec3 voxel) {
 Wrapper around array to prevent invalid access
 */
 int getVoxel(ivec3 voxel) {
-    if (voxel.x < 0 || voxel.y < 0 || voxel.z < 0 ||
-        voxel.x >= CHUNK_SIZE_VOXELS || voxel.y >= CHUNK_SIZE_VOXELS || voxel.z >= CHUNK_HEIGHT_VOXELS) {
+    if (voxel.x < 0 || voxel.y < 0 || voxel.z < 0) {
         return 0;
-        /* Return the maximum plane distance to the world bounds */
-        int xDist = 0;
-        int minDist = 0; /* TODO Replace giant if block to check for rays going out of world with getVoxel returning distance to world */
     }
-    return chunkIn.voxels[voxel.x + voxel.y * CHUNK_SIZE_VOXELS + voxel.z * CHUNK_SIZE_VOXELS * CHUNK_SIZE_VOXELS];
+    if (voxel.x >= CHUNK_WIDTH_VOXELS || voxel.y >= CHUNK_WIDTH_VOXELS || voxel.z >= CHUNK_HEIGHT_VOXELS) {
+        return 0;
+    }
+    return chunkIn.voxels[voxel.x + voxel.y * CHUNK_WIDTH_VOXELS + voxel.z * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS];
 }
 
 const float eps = 0.1;
@@ -94,13 +93,13 @@ VoxelIntersection distanceToVoxelAlongRay(vec3 origin, vec3 direction, float max
     vec3 axisDistancesToWorldBounds = vec3(0.0, 0.0, 0.0);
     if (curPos.x < 0.0 && direction.x > 0.0) {
         axisDistancesToWorldBounds.x = abs(curPos.x) / direction.x;
-    } else if (curPos.x > CHUNK_SIZE_VOXELS && direction.x < 0.0) {
-        axisDistancesToWorldBounds.x = (curPos.x - CHUNK_SIZE_VOXELS) / direction.x;
+    } else if (curPos.x > CHUNK_WIDTH_VOXELS && direction.x < 0.0) {
+        axisDistancesToWorldBounds.x = (curPos.x - CHUNK_WIDTH_VOXELS) / direction.x;
     }
     if (curPos.y < 0.0 && direction.y > 0.0) {
         axisDistancesToWorldBounds.y = abs(curPos.y) / direction.y;
-    } else if (curPos.y > CHUNK_SIZE_VOXELS && direction.y < 0.0) {
-        axisDistancesToWorldBounds.y = (curPos.y - CHUNK_SIZE_VOXELS) / direction.y;
+    } else if (curPos.y > CHUNK_WIDTH_VOXELS && direction.y < 0.0) {
+        axisDistancesToWorldBounds.y = (curPos.y - CHUNK_WIDTH_VOXELS) / direction.y;
     }
     if (curPos.z < 0.0 && direction.z > 0.0) {
         axisDistancesToWorldBounds.z = abs(curPos.z) / direction.z;
@@ -111,11 +110,11 @@ VoxelIntersection distanceToVoxelAlongRay(vec3 origin, vec3 direction, float max
     */
     for (; i < MAX_STEPS && totalDist < maxlen; i++) {
         /* Exiting world bounds check */
-        if (curPos.x > CHUNK_SIZE_VOXELS + 1.0 && direction.x >= 0.0)
+        if (curPos.x > CHUNK_WIDTH_VOXELS + 1.0 && direction.x >= 0.0)
             return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
         if (curPos.x < -1.0 && direction.x <= 0.0)
             return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
-        if (curPos.y > CHUNK_SIZE_VOXELS + 1.0 && direction.y >= 0.0)
+        if (curPos.y > CHUNK_WIDTH_VOXELS + 1.0 && direction.y >= 0.0)
             return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
         if (curPos.y < -1.0 && direction.y <= 0.0)
             return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
@@ -125,6 +124,7 @@ VoxelIntersection distanceToVoxelAlongRay(vec3 origin, vec3 direction, float max
             return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
         // For each axis, coordinate of the next plane we will reach
         vec3 nextPlaneCoords = vec3(0.0);
+        // next plane in positive and negative directions
         nextPlaneCoords.x = rayAxesDirections.x >= 0.0 ? floor(curPos.x + 0.999999999) : ceil(curPos.x - 0.999999999);
         nextPlaneCoords.y = rayAxesDirections.y >= 0.0 ? floor(curPos.y + 0.999999999) : ceil(curPos.y - 0.999999999);
         nextPlaneCoords.z = rayAxesDirections.z >= 0.0 ? floor(curPos.z + 0.999999999) : ceil(curPos.z - 0.999999999);
@@ -180,7 +180,7 @@ VoxelIntersection distanceToVoxelAlongRay(vec3 origin, vec3 direction, float max
     return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1));
 }
 
-const float shadowOffset = 0.00001;
+const float shadowOffset = 0.0001;
 /*
 Computes the intensity of lighting coming directly from the sun at a given point with given normal
 */
@@ -302,7 +302,7 @@ void main() {
         VoxelIntersection curSample = distanceToVoxelAlongRay(rayOrigin, curSampleDirection, MAX_DIST);
         outputColor += curSample.dist > 0.0 ? voxelColor(curSample.id) * (1.0 + (random(vec2(curSample.idx.x - curSample.idx.z, curSample.idx.y + curSample.idx.z)) - 0.5) * voxelColorVariance(curSample.id))
                                            * (directLightingAtPoint(camera.position + curSampleDirection * curSample.dist, curSample.normal, camera.sunDirection) * 0.5
-                                             + indirectLightingAtPoint(camera.position + curSampleDirection * curSample.dist, curSample.normal, camera.sunDirection) * 0.5) : vec3(1.0);
+                                             + indirectLightingAtPoint(camera.position + curSampleDirection * curSample.dist, curSample.normal, camera.sunDirection) * 0.5) : skyboxColorInDirection(curSampleDirection);
     }
     outputColor /= float(SAMPLES);
     //outputColor = vec3(pow(outputColor.x, 0.45), pow(outputColor.y, 0.45), pow(outputColor.z, 0.45));

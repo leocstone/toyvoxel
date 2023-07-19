@@ -54,7 +54,7 @@ static int findClosestVoxel(int tx, int ty, int tz, VoxelChunk* chunkIn) {
         /* +Y Plane */
         y = ty + radius;
         if (y < CHUNK_WIDTH_VOXELS) {
-            for (x = std::max(0, tx - radius); (x < tx + radius) && (x < CHUNK_WIDTH_VOXELS); x++) {
+            for (x = std::max(0, tx - radius + 1); (x < tx + radius - 1) && (x < CHUNK_WIDTH_VOXELS); x++) {
                 for (z = std::max(0, tz - radius); (z < tz + radius) && (z < CHUNK_HEIGHT_VOXELS); z++) {
                     boundsCheck(x, y, z);
                     if (chunkIn->getVoxel(x, y, z) < 0)
@@ -65,7 +65,7 @@ static int findClosestVoxel(int tx, int ty, int tz, VoxelChunk* chunkIn) {
         /* -Y Plane */
         y = ty - radius;
         if (y > 0) {
-            for (x = std::max(0, tx - radius); (x < tx + radius) && (x < CHUNK_WIDTH_VOXELS); x++) {
+            for (x = std::max(0, tx - radius + 1); (x < tx + radius - 1) && (x < CHUNK_WIDTH_VOXELS); x++) {
                 for (z = std::max(0, tz - radius); (z < tz + radius) && (z < CHUNK_HEIGHT_VOXELS); z++) {
                     boundsCheck(x, y, z);
                     if (chunkIn->getVoxel(x, y, z) < 0)
@@ -76,8 +76,8 @@ static int findClosestVoxel(int tx, int ty, int tz, VoxelChunk* chunkIn) {
         /* +Z Plane */
         z = tz + radius;
         if (z < CHUNK_HEIGHT_VOXELS) {
-            for (x = std::max(0, tx - radius); (x < tx + radius) && (x < CHUNK_WIDTH_VOXELS); x++) {
-                for (y = std::max(0, ty - radius); (y < ty + radius) && (y < CHUNK_WIDTH_VOXELS); y++) {
+            for (x = std::max(0, tx - radius + 1); (x < tx + radius - 1) && (x < CHUNK_WIDTH_VOXELS); x++) {
+                for (y = std::max(0, ty - radius + 1); (y < ty + radius - 1) && (y < CHUNK_WIDTH_VOXELS); y++) {
                     boundsCheck(x, y, z);
                     if (chunkIn->getVoxel(x, y, z) < 0)
                         return radius - 1;
@@ -87,8 +87,8 @@ static int findClosestVoxel(int tx, int ty, int tz, VoxelChunk* chunkIn) {
         /* -Z Plane */
         z = tz - radius;
         if (z > 0) {
-            for (x = std::max(0, tx - radius); (x < tx + radius) && (x < CHUNK_WIDTH_VOXELS); x++) {
-                for (y = std::max(0, ty - radius); (y < ty + radius) && (y < CHUNK_WIDTH_VOXELS); y++) {
+            for (x = std::max(0, tx - radius + 1); (x < tx + radius - 1) && (x < CHUNK_WIDTH_VOXELS); x++) {
+                for (y = std::max(0, ty - radius + 1); (y < ty + radius - 1) && (y < CHUNK_WIDTH_VOXELS); y++) {
                     boundsCheck(x, y, z);
                     if (chunkIn->getVoxel(x, y, z) < 0)
                         return radius - 1;
@@ -238,6 +238,23 @@ static VoxelChunk* axes() {
     return result;
 }
 
+static VoxelChunk* grassTest() {
+    VoxelChunk* result = new VoxelChunk();
+    constexpr double scale_factor = 32.0;
+    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
+        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
+            for (int z = 0; z < CHUNK_HEIGHT_VOXELS; z++) {
+                double height = CHUNK_HEIGHT_VOXELS - Perlin::octavePerlin(double(x) / scale_factor, double(y) / scale_factor, 55.0, 16, 0.5) * 1.5 * VOXELS_PER_METER - 2.0 * VOXELS_PER_METER;
+                result->setVoxel(x, y, z, (z <= height) ? -3 : 0);
+            }
+        }
+        std::cout << "\rGenerating grass voxels: " << x + 1 << " / " << CHUNK_WIDTH_VOXELS;
+    }
+    std::cout << " done." << std::endl;
+
+    return result;
+}
+
 static VoxelChunk* forestTest() {
     VoxelChunk* result = new VoxelChunk();
 
@@ -245,7 +262,7 @@ static VoxelChunk* forestTest() {
 }
 
 VoxelChunk* WorldGenerator::generateChunk() {
-    VoxelChunk* result = erosionTest();
-    computeDistances(result);
+    VoxelChunk* result = grassTest();
+    //computeDistances(result);
     return result;
 }

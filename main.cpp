@@ -20,7 +20,6 @@
 #include <chrono>
 #include <array>
 
-#define STB_IMAGE_IMPLEMENTATION
 #include "lib/stb_image.h"
 
 #include <vulkan/vk_enum_string_helper.h>
@@ -28,7 +27,7 @@
 #include "worldgenerator.h"
 
 struct Camera {
-    alignas(16) glm::vec3 position = glm::vec3(0, 0, 2);
+    alignas(16) glm::vec3 position = glm::vec3(CHUNK_WIDTH_METERS / 2.0, CHUNK_WIDTH_METERS / 2.0, 7);
     alignas(16) glm::vec3 forward = glm::vec3(0, 1, 0);
     alignas(16) glm::vec3 up = glm::vec3(0, 0, 1);
     alignas(16) glm::vec3 right = glm::vec3(1, 0, 0);
@@ -97,6 +96,7 @@ const uint32_t RENDER_SCALE = 2;
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
+uint64_t frameCounter = 0;
 
 const std::vector<const char*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
@@ -165,6 +165,7 @@ private:
     VkCommandPool commandPool;
     std::vector<VkCommandBuffer> commandBuffers;
     std::vector<VkCommandBuffer> computeCommandBuffers;
+    std::vector<VkCommandBuffer> computeDistancesCommandBuffers;
 
     std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> computeFinishedSemaphores;
@@ -203,6 +204,13 @@ private:
 
     std::vector<VkBuffer> voxelBuffers;
     std::vector<VkDeviceMemory> voxelBuffersMemory;
+
+    /* Compute - calculating distance field */
+    VkDescriptorSetLayout computeDistancesSetLayout;
+    VkDescriptorPool computeDistancesPool;
+    std::vector<VkDescriptorSet> computeDistancesDescriptorSets;
+    VkPipeline computeDistancesPipeline;
+    VkPipelineLayout computeDistancesPipelineLayout;
 
     /* Camera */
     Camera camera;
@@ -304,6 +312,161 @@ private:
         createComputeUniformBuffers();
         createComputeDescriptorPool();
         createComputeDescriptorSets();
+        // Compute distances
+        createComputeDistancesLayout();
+        createComputeDistancesPipeline();
+        createComputeDistancesPool();
+        createComputeDistancesDescriptorSets();
+        // Compute actual distances...
+        computeVoxelDistances();
+    }
+
+    void computeVoxelDistances() {
+        std::cout << "Computing voxel distances...";
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            VkCommandBufferBeginInfo beginInfo {};
+            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+            if (vkBeginCommandBuffer(computeDistancesCommandBuffers[i], &beginInfo) != VK_SUCCESS) {
+                throw std::runtime_error("Failed to begin recording compute command buffer!");
+            }
+
+            vkCmdBindPipeline(computeDistancesCommandBuffers[i], VK_PIPELINE_BIND_POINT_COMPUTE, computeDistancesPipeline);
+            vkCmdBindDescriptorSets(computeDistancesCommandBuffers[i], VK_PIPELINE_BIND_POINT_COMPUTE, computeDistancesPipelineLayout,
+                                    0, 1, &computeDistancesDescriptorSets[i], 0, nullptr);
+            vkCmdDispatch(computeDistancesCommandBuffers[i], CHUNK_WIDTH_VOXELS / 16, CHUNK_WIDTH_VOXELS / 8, CHUNK_HEIGHT_VOXELS / 8);
+
+            if (vkEndCommandBuffer(computeDistancesCommandBuffers[i]) != VK_SUCCESS) {
+                throw std::runtime_error("Failed to record compute distances command buffer!");
+            }
+
+            VkSubmitInfo computeDistancesSubmitInfo {};
+            computeDistancesSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+            VkPipelineStageFlags computeWaitStages[] = {VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT};
+            computeDistancesSubmitInfo.waitSemaphoreCount = 0;
+            computeDistancesSubmitInfo.pWaitSemaphores = nullptr;
+            computeDistancesSubmitInfo.pWaitDstStageMask = computeWaitStages;
+
+            computeDistancesSubmitInfo.commandBufferCount = 1;
+            computeDistancesSubmitInfo.pCommandBuffers = &computeDistancesCommandBuffers[i];
+
+            computeDistancesSubmitInfo.signalSemaphoreCount = 0;
+            computeDistancesSubmitInfo.pSignalSemaphores = nullptr;
+
+            VkResult result;
+            if ((result = vkQueueSubmit(computeQueue, 1, &computeDistancesSubmitInfo, VK_NULL_HANDLE)) != VK_SUCCESS) {
+                std::cerr << string_VkResult(result) << std::endl;
+                throw std::runtime_error("Failed to submit compute distances command buffer");
+            }
+        }
+
+        vkQueueWaitIdle(computeQueue);
+        std::cout << "done." << std::endl;
+    }
+
+    void createComputeDistancesLayout() {
+        std::array<VkDescriptorSetLayoutBinding, 1> layoutBindings {};
+        layoutBindings[0].binding = 0;
+        layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        layoutBindings[0].descriptorCount = 1;
+        layoutBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        layoutBindings[0].pImmutableSamplers = nullptr;
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo {};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = static_cast<uint32_t>(layoutBindings.size());
+        layoutInfo.pBindings = layoutBindings.data();
+
+        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &computeDistancesSetLayout) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create compute distance descriptor set layout!");
+        }
+    }
+
+    void createComputeDistancesPipeline() {
+        VkPipelineLayoutCreateInfo pipelineLayoutInfo {};
+        pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &computeDistancesSetLayout;
+
+        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &computeDistancesPipelineLayout) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create compute distances pipeline layout!");
+        }
+
+        auto computeDistancesShaderCode = readFile("shaders/compute_distances.spv");
+
+        VkShaderModule computeDistancesShaderModule = createShaderModule(computeDistancesShaderCode);
+
+        VkPipelineShaderStageCreateInfo computeDistancesShaderStageInfo {};
+        computeDistancesShaderStageInfo.sType =  VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        computeDistancesShaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+        computeDistancesShaderStageInfo.module = computeDistancesShaderModule;
+        computeDistancesShaderStageInfo.pName = "main";
+
+        VkComputePipelineCreateInfo pipelineInfo {};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipelineInfo.layout = computeDistancesPipelineLayout;
+        pipelineInfo.stage = computeDistancesShaderStageInfo;
+
+        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr,
+                                     &computeDistancesPipeline) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create compute distances pipeline!");
+        }
+
+        vkDestroyShaderModule(device, computeDistancesShaderModule, nullptr);
+    }
+
+    void createComputeDistancesPool() {
+        std::array<VkDescriptorPoolSize, 1> poolSizes {};
+        poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+        VkDescriptorPoolCreateInfo poolInfo {};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+        poolInfo.pPoolSizes = poolSizes.data();
+        poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolInfo.flags = 0;
+
+        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &computeDistancesPool) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create compute distances descriptor pool!");
+        }
+    }
+
+    void createComputeDistancesDescriptorSets() {
+        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, computeDistancesSetLayout);
+        VkDescriptorSetAllocateInfo allocInfo {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = computeDistancesPool;
+        allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        allocInfo.pSetLayouts = layouts.data();
+
+        computeDistancesDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+        VkResult result = vkAllocateDescriptorSets(device, &allocInfo, computeDistancesDescriptorSets.data());
+
+        if (result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to allocate compute distances descriptor sets!");
+        }
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            VkDescriptorBufferInfo bufferInfo {};
+            bufferInfo.buffer = voxelBuffers[i];
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeof(VoxelChunk);
+
+            std::array<VkWriteDescriptorSet, 1> descriptorWrites {};
+
+            descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[0].dstSet = computeDistancesDescriptorSets[i];
+            descriptorWrites[0].dstBinding = 0;
+            descriptorWrites[0].dstArrayElement = 0;
+            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            descriptorWrites[0].descriptorCount = 1;
+            descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
+                                   descriptorWrites.data(), 0, nullptr);
+        }
     }
 
     void createComputeUniformBuffers() {
@@ -1242,6 +1405,14 @@ private:
         if (vkAllocateCommandBuffers(device, &allocInfo, computeCommandBuffers.data()) != VK_SUCCESS) {
             throw std::runtime_error("failed to allocate compute command buffers!");
         }
+
+        /* Compute distances command buffers */
+        computeDistancesCommandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        allocInfo.commandBufferCount = (uint32_t) computeDistancesCommandBuffers.size();
+
+        if (vkAllocateCommandBuffers(device, &allocInfo, computeDistancesCommandBuffers.data()) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to allocate compute distances command buffers!");
+        }
     }
 
     void createCommandPool() {
@@ -1896,15 +2067,21 @@ private:
 
     void mainLoop() {
         lastFrameStart = std::chrono::high_resolution_clock::now();
+        double timeSpentRendering = 0.0;
         while (!glfwWindowShouldClose(window) && !shouldQuit) {
-            const auto start = std::chrono::steady_clock::now();
             glfwPollEvents();
             //std::cout << "Frame " << currentFrame << std::endl;
+            const auto start = std::chrono::steady_clock::now();
             drawFrame();
             const auto end = std::chrono::steady_clock::now();
             const std::chrono::duration<double> elapsed_seconds = end - start;
-            std::cout << 1 / elapsed_seconds.count() << std::endl;
+            //std::cout << 1 / elapsed_seconds.count() << std::endl;
+            timeSpentRendering += elapsed_seconds.count();
+            frameCounter++;
         }
+        std::cout << "Frames rendered: " << frameCounter << std::endl;
+        std::cout << "Time taken: " << timeSpentRendering << std::endl;
+        std::cout << "Avg FPS: " << 1 / (timeSpentRendering / double(frameCounter)) << std::endl;
 
         vkDeviceWaitIdle(device);
     }
@@ -2001,7 +2178,8 @@ private:
         computeSubmitInfo.signalSemaphoreCount = 1;
         computeSubmitInfo.pSignalSemaphores = computeSignalSemaphores;
 
-        if (vkQueueSubmit(computeQueue, 1, &computeSubmitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
+        if ((result = vkQueueSubmit(computeQueue, 1, &computeSubmitInfo, VK_NULL_HANDLE)) != VK_SUCCESS) {
+            std::cerr << string_VkResult(result) << std::endl;
             throw std::runtime_error("failed to submit compute command buffer!");
         }
 
@@ -2085,6 +2263,13 @@ private:
 
     void cleanup() {
         cleanupSwapChain();
+
+        /* Clean up compute distances pipeline */
+        vkDestroyPipelineLayout(device, computeDistancesPipelineLayout, nullptr);
+        vkDestroyPipeline(device, computeDistancesPipeline, nullptr);
+
+        vkDestroyDescriptorPool(device, computeDistancesPool, nullptr);
+        vkDestroyDescriptorSetLayout(device, computeDistancesSetLayout, nullptr);
 
         /* Clean up compute pipeline and related structures */
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
