@@ -262,7 +262,7 @@ static VoxelChunk* forestTest() {
 }
 
 VoxelChunk* WorldGenerator::generateChunk() {
-    VoxelChunk* result = grassTest();
+    VoxelChunk* result = basicPerlinTest();
     //computeDistances(result);
     return result;
 }

@@ -27,7 +27,7 @@
 #include "worldgenerator.h"
 
 struct Camera {
-    alignas(16) glm::vec3 position = glm::vec3(CHUNK_WIDTH_METERS / 2.0, CHUNK_WIDTH_METERS / 2.0, 7);
+    alignas(16) glm::vec3 position = glm::vec3(CHUNK_WIDTH_METERS / 2.0, CHUNK_WIDTH_METERS / 2.0, CHUNK_HEIGHT_METERS / 2.0);
     alignas(16) glm::vec3 forward = glm::vec3(0, 1, 0);
     alignas(16) glm::vec3 up = glm::vec3(0, 0, 1);
     alignas(16) glm::vec3 right = glm::vec3(1, 0, 0);
@@ -197,10 +197,11 @@ private:
     std::vector<VkDescriptorSet> computeDescriptorSets;
     VkPipeline computePipeline;
     VkPipelineLayout computePipelineLayout;
-
+    /*
     std::vector<VkBuffer> computeUniformBuffers;
     std::vector<VkDeviceMemory> computeUniformsMemory;
     std::vector<void*> computeUniformsMapped;
+    */
 
     std::vector<VkBuffer> voxelBuffers;
     std::vector<VkDeviceMemory> voxelBuffersMemory;
@@ -309,7 +310,6 @@ private:
         createSyncObjects();
         createComputeDescriptorSetLayout();
         createComputePipeline();
-        createComputeUniformBuffers();
         createComputeDescriptorPool();
         createComputeDescriptorSets();
         // Compute distances
@@ -469,6 +469,7 @@ private:
         }
     }
 
+    /*
     void createComputeUniformBuffers() {
         VkDeviceSize bufferSize = sizeof(Camera);
 
@@ -483,15 +484,14 @@ private:
             vkMapMemory(device, computeUniformsMemory[i], 0, bufferSize, 0, &computeUniformsMapped[i]);
         }
     }
+    */
 
     void createComputeDescriptorPool() {
-        std::array<VkDescriptorPoolSize, 3> poolSizes {};
-        poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        std::array<VkDescriptorPoolSize, 2> poolSizes {};
+        poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-        poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-        poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        poolSizes[2].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
         VkDescriptorPoolCreateInfo poolInfo {};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -522,11 +522,6 @@ private:
         }
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            VkDescriptorBufferInfo bufferInfo {};
-            bufferInfo.buffer = computeUniformBuffers[i];
-            bufferInfo.offset = 0;
-            bufferInfo.range = sizeof(Camera);
-
             VkDescriptorImageInfo outputImageInfo {};
             outputImageInfo.sampler = textureSampler;
             outputImageInfo.imageView = renderImageViews[i];
@@ -537,31 +532,23 @@ private:
             voxelBufferInfo.offset = 0;
             voxelBufferInfo.range = sizeof(VoxelChunk);
 
-            std::array<VkWriteDescriptorSet, 3> descriptorWrites {};
+            std::array<VkWriteDescriptorSet, 2> descriptorWrites {};
 
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstSet = computeDescriptorSets[i];
             descriptorWrites[0].dstBinding = 0;
             descriptorWrites[0].dstArrayElement = 0;
-            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             descriptorWrites[0].descriptorCount = 1;
-            descriptorWrites[0].pBufferInfo = &bufferInfo;
+            descriptorWrites[0].pImageInfo = &outputImageInfo;
 
             descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[1].dstSet = computeDescriptorSets[i];
             descriptorWrites[1].dstBinding = 1;
             descriptorWrites[1].dstArrayElement = 0;
-            descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             descriptorWrites[1].descriptorCount = 1;
-            descriptorWrites[1].pImageInfo = &outputImageInfo;
-
-            descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[2].dstSet = computeDescriptorSets[i];
-            descriptorWrites[2].dstBinding = 2;
-            descriptorWrites[2].dstArrayElement = 0;
-            descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            descriptorWrites[2].descriptorCount = 1;
-            descriptorWrites[2].pBufferInfo = &voxelBufferInfo;
+            descriptorWrites[1].pBufferInfo = &voxelBufferInfo;
 
             vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
                                    descriptorWrites.data(), 0, nullptr);
@@ -578,7 +565,7 @@ private:
             VkWriteDescriptorSet descriptorWrite {};
             descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrite.dstSet = computeDescriptorSets[i];
-            descriptorWrite.dstBinding = 1;
+            descriptorWrite.dstBinding = 0;
             descriptorWrite.dstArrayElement = 0;
             descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             descriptorWrite.descriptorCount = 1;
@@ -609,24 +596,19 @@ private:
     }
 
     void createComputeDescriptorSetLayout() {
-        std::array<VkDescriptorSetLayoutBinding, 3> layoutBindings {};
+        std::array<VkDescriptorSetLayoutBinding, 2> layoutBindings {};
+
         layoutBindings[0].binding = 0;
-        layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         layoutBindings[0].descriptorCount = 1;
-        layoutBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         layoutBindings[0].pImmutableSamplers = nullptr;
+        layoutBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
         layoutBindings[1].binding = 1;
         layoutBindings[1].descriptorCount = 1;
-        layoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        layoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         layoutBindings[1].pImmutableSamplers = nullptr;
         layoutBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-        layoutBindings[2].binding = 2;
-        layoutBindings[2].descriptorCount = 1;
-        layoutBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        layoutBindings[2].pImmutableSamplers = nullptr;
-        layoutBindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
         VkDescriptorSetLayoutCreateInfo layoutInfo {};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -644,6 +626,15 @@ private:
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1;
         pipelineLayoutInfo.pSetLayouts = &computeDescriptorSetLayout;
+
+        // Push constant
+        VkPushConstantRange pushConstantRange {};
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(Camera);
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        pipelineLayoutInfo.pushConstantRangeCount = 1;
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
         if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &computePipelineLayout) != VK_SUCCESS) {
             throw std::runtime_error("failed to create compute pipeline layout!");
@@ -1315,7 +1306,8 @@ private:
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout,
                                 0, 1, &computeDescriptorSets[currentFrame], 0, nullptr);
-
+        vkCmdPushConstants(commandBuffer, computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT,
+                           0, sizeof(Camera), &camera);
         vkCmdDispatch(commandBuffer, ((swapChainExtent.width / RENDER_SCALE) + 31) / 32, ((swapChainExtent.height / RENDER_SCALE) + 31) / 32, 1);
 
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
@@ -2157,8 +2149,6 @@ private:
         camera.sunDirection = glm::normalize(glm::vec3(0.1 * glm::sin(camera.cur_time) + 1, 0.1 * glm::cos(camera.cur_time) + 1, 0.1 * glm::sin(camera.cur_time) - 1));
 
         /* Compute shader block */
-        memcpy(computeUniformsMapped[currentFrame], &camera, sizeof(camera));
-
         vkResetCommandBuffer(computeCommandBuffers[currentFrame], 0);
         recordComputeCommandBuffer(computeCommandBuffers[currentFrame], imageIndex);
 
@@ -2272,10 +2262,12 @@ private:
         vkDestroyDescriptorSetLayout(device, computeDistancesSetLayout, nullptr);
 
         /* Clean up compute pipeline and related structures */
+        /*
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroyBuffer(device, computeUniformBuffers[i], nullptr);
             vkFreeMemory(device, computeUniformsMemory[i], nullptr);
         }
+        */
 
         vkDestroyPipelineLayout(device, computePipelineLayout, nullptr);
         vkDestroyPipeline(device, computePipeline, nullptr);

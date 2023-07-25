@@ -1,6 +1,6 @@
 #version 450
 
-const int CHUNK_WIDTH_METERS = 48;
+const int CHUNK_WIDTH_METERS = 32;
 const int CHUNK_HEIGHT_METERS = 8;
 const int VOXELS_PER_METER = 8;
 const int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;

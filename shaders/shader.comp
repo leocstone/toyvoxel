@@ -1,6 +1,6 @@
 #version 450
 
-const int CHUNK_WIDTH_METERS = 48;
+const int CHUNK_WIDTH_METERS = 32;
 const int CHUNK_HEIGHT_METERS = 8;
 const int VOXELS_PER_METER = 8;
 const int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
@@ -10,18 +10,18 @@ struct VoxelChunk {
     int voxels[CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * CHUNK_HEIGHT_VOXELS];
 };
 
-layout(binding = 0) uniform Camera {
+layout(push_constant) uniform PushConstants {
     vec3 position;
     vec3 forward;
     vec3 up;
     vec3 right;
     float time;
     vec3 sunDirection;
-} camera;
+} pushConstants;
 
-layout(binding = 1, rgba8) uniform writeonly image2D outputImage;
+layout(binding = 0, rgba8) uniform writeonly image2D outputImage;
 
-layout(std430, binding = 2) readonly buffer VoxelChunkIn {
+layout(std430, binding = 1) readonly buffer VoxelChunkIn {
     VoxelChunk chunkIn;
 };
 
@@ -286,23 +286,23 @@ void main() {
     const float lensY = (pixelDimensions.y / pixelDimensions.x) * lensX;
     const float pixelSize = lensX / pixelDimensions.x;
     
-    const vec3 rayOrigin = camera.position;
-    vec3 rayDirection = camera.position + camera.forward * focalLength;
+    const vec3 rayOrigin = pushConstants.position;
+    vec3 rayDirection = pushConstants.position + pushConstants.forward * focalLength;
     // Cast ray through "lens" at corresponding pixel point
-    rayDirection += camera.up * (lensY / 2.0);
-    rayDirection -= camera.right * (lensX / 2.0);
-    rayDirection += (pixel.x / pixelDimensions.x) * camera.right * lensX;
-    rayDirection -= (pixel.y / pixelDimensions.y) * camera.up * lensY;
+    rayDirection += pushConstants.up * (lensY / 2.0);
+    rayDirection -= pushConstants.right * (lensX / 2.0);
+    rayDirection += (pixel.x / pixelDimensions.x) * pushConstants.right * lensX;
+    rayDirection -= (pixel.y / pixelDimensions.y) * pushConstants.up * lensY;
     
     vec3 outputColor = vec3(0.0);
     for (int i = 0; i < SAMPLES; i++) {
-        vec3 randomOffset = camera.right * random(vec2(pixel.x + i, pixel.y)) - camera.up * random(vec2(pixel.x, pixel.y + i));
+        vec3 randomOffset = pushConstants.right * random(vec2(pixel.x + i, pixel.y)) - pushConstants.up * random(vec2(pixel.x, pixel.y + i));
         vec3 curSampleDirection = rayDirection + randomOffset * pixelSize;
-        curSampleDirection = normalize(curSampleDirection - camera.position);
+        curSampleDirection = normalize(curSampleDirection - pushConstants.position);
         VoxelIntersection curSample = distanceToVoxelAlongRay(rayOrigin, curSampleDirection, MAX_DIST);
         outputColor += curSample.dist > 0.0 ? voxelColor(curSample.id) * (1.0 + (random(vec2(curSample.idx.x - curSample.idx.z, curSample.idx.y + curSample.idx.z)) - 0.5) * voxelColorVariance(curSample.id))
-                                           * (directLightingAtPoint(camera.position + curSampleDirection * curSample.dist, curSample.normal, camera.sunDirection) * 0.5
-                                             + indirectLightingAtPoint(camera.position + curSampleDirection * curSample.dist, curSample.normal, camera.sunDirection) * 0.5) : skyboxColorInDirection(curSampleDirection);
+                                           * (directLightingAtPoint(pushConstants.position + curSampleDirection * curSample.dist, curSample.normal, pushConstants.sunDirection) * 0.5
+                                             + indirectLightingAtPoint(pushConstants.position + curSampleDirection * curSample.dist, curSample.normal, pushConstants.sunDirection) * 0.5) : skyboxColorInDirection(curSampleDirection);
     }
     outputColor /= float(SAMPLES);
     //outputColor = vec3(pow(outputColor.x, 0.45), pow(outputColor.y, 0.45), pow(outputColor.z, 0.45));
