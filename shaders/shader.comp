@@ -1,8 +1,8 @@
 #version 450
 
-const int CHUNK_WIDTH_METERS = 32;
-const int CHUNK_HEIGHT_METERS = 8;
-const int VOXELS_PER_METER = 8;
+const int CHUNK_WIDTH_METERS = 8;
+const int CHUNK_HEIGHT_METERS = 32;
+const int VOXELS_PER_METER = 16;
 const int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
 const int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
 
@@ -26,7 +26,7 @@ layout(std430, binding = 1) readonly buffer VoxelChunkIn {
 };
 
 const int SAMPLES = 1;
-const int MAX_STEPS = CHUNK_WIDTH_VOXELS * 2;
+const int MAX_STEPS = 10000;
 const int MAX_BOUNCES = 1;
 const float MAX_DIST = 10000.0;
 
@@ -196,6 +196,7 @@ float directLightingAtPoint(vec3 point, vec3 normal, vec3 sunDir) {
 Computes the intensity of lighting reflecting off of other surfaces at a given point with given normal
 */
 float indirectLightingAtPoint(vec3 point, vec3 normal, vec3 sunDir) {
+    return 1.0;
     for (int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
         // Offset the normal by a small amount
         const float diffuse = 1.0;
@@ -248,6 +249,10 @@ vec3 voxelColor(int idx) {
         return vec3(188.0, 108.0, 37.0) / 255.0;
     case 3: // Grass
         return vec3(96.0, 108.0, 56.0) / 255.0;
+    case 4: // Bark
+        return vec3(122.0, 119.0, 110.0) / 255.0;
+    case 5: // Wood
+        return vec3(224, 201, 137) / 255.0;
     default:
         return vec3(1.0, 0.0, 0.0);
     }
@@ -263,6 +268,10 @@ float voxelColorVariance(int idx) {
     case 2: // Dirt
         return 0.05;
     case 3: // Grass
+        return 0.1;
+    case 4: // Bark
+        return 0.1;
+    case 5: // Wood
         return 0.1;
     default:
         return 0.01;
@@ -296,11 +305,11 @@ void main() {
     
     vec3 outputColor = vec3(0.0);
     for (int i = 0; i < SAMPLES; i++) {
-        vec3 randomOffset = pushConstants.right * random(vec2(pixel.x + i, pixel.y)) - pushConstants.up * random(vec2(pixel.x, pixel.y + i));
-        vec3 curSampleDirection = rayDirection + randomOffset * pixelSize;
+        //vec3 randomOffset = pushConstants.right * random(vec2(pixel.x + i, pixel.y)) - pushConstants.up * random(vec2(pixel.x, pixel.y + i));
+        vec3 curSampleDirection = rayDirection;// + randomOffset * pixelSize;
         curSampleDirection = normalize(curSampleDirection - pushConstants.position);
         VoxelIntersection curSample = distanceToVoxelAlongRay(rayOrigin, curSampleDirection, MAX_DIST);
-        outputColor += curSample.dist > 0.0 ? voxelColor(curSample.id) * (1.0 + (random(vec2(curSample.idx.x - curSample.idx.z, curSample.idx.y + curSample.idx.z)) - 0.5) * voxelColorVariance(curSample.id))
+        outputColor += curSample.dist > 0.0 ? voxelColor(curSample.id) * (1.0 + (random(vec2(curSample.idx.x + curSample.idx.z * curSample.idx.x, curSample.idx.y + curSample.idx.z * curSample.idx.y)) - 0.5) * voxelColorVariance(curSample.id))
                                            * (directLightingAtPoint(pushConstants.position + curSampleDirection * curSample.dist, curSample.normal, pushConstants.sunDirection) * 0.5
                                              + indirectLightingAtPoint(pushConstants.position + curSampleDirection * curSample.dist, curSample.normal, pushConstants.sunDirection) * 0.5) : skyboxColorInDirection(curSampleDirection);
     }

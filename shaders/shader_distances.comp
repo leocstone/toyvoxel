@@ -1,16 +1,10 @@
 #version 450
 
-const int CHUNK_WIDTH_METERS = 32;
-const int CHUNK_HEIGHT_METERS = 8;
-const int VOXELS_PER_METER = 8;
+const int CHUNK_WIDTH_METERS = 8;
+const int CHUNK_HEIGHT_METERS = 32;
+const int VOXELS_PER_METER = 16;
 const int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
 const int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
-
-/* Temporary solution to working on a buffer larger than max dispatch size - each invocation processes many z indices */
-/*
-const int MAX_DISPATCH_INVOCATIONS = 32 * 32;
-const int Z_INVOCATIONS = (CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * CHUNK_HEIGHT_VOXELS) / MAX_DISPATCH_INVOCATIONS;
-*/
 
 struct VoxelChunk {
     int voxels[CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * CHUNK_HEIGHT_VOXELS];
@@ -20,85 +14,122 @@ layout(std430, binding = 0) buffer VoxelChunkIn {
     VoxelChunk chunkIn;
 };
 
-//const ivec3 COORD_SCALES = ivec3(1, CHUNK_WIDTH_VOXELS, CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS);
+int flatIndex(ivec3 coord) {
+    return coord.x + coord.y * CHUNK_WIDTH_VOXELS + coord.z * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS;
+}
+
 int getVoxel(ivec3 coord) {
-    return chunkIn.voxels[coord.x + coord.y * CHUNK_WIDTH_VOXELS + coord.z * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS];
+    if (coord.x < 0 || coord.x >= CHUNK_WIDTH_VOXELS || coord.y < 0 || coord.y >= CHUNK_WIDTH_VOXELS || coord.z < 0 || coord.z >= CHUNK_HEIGHT_VOXELS) {
+        return 0;
+    }
+
+    return chunkIn.voxels[flatIndex(coord)];
 }
 
 void setVoxel(ivec3 coord, int v) {
-    chunkIn.voxels[coord.x + coord.y * CHUNK_WIDTH_VOXELS + coord.z * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS] = v;
+    if (coord.x < 0 || coord.x >= CHUNK_WIDTH_VOXELS || coord.y < 0 || coord.y >= CHUNK_WIDTH_VOXELS || coord.z < 0 || coord.z >= CHUNK_HEIGHT_VOXELS) {
+        return;
+    }
+
+    chunkIn.voxels[flatIndex(coord)] = v;
 }
 
-const int max_search_radius = 64;
+const int max_search_radius = 4;
 int findClosestVoxel(ivec3 checked) {
+    /*
     if (checked.x < 0 || checked.y < 0 || checked.z < 0 ||
-        checked.x > CHUNK_WIDTH_VOXELS || checked.y > CHUNK_WIDTH_VOXELS || checked.z > CHUNK_WIDTH_VOXELS)
+        checked.x >= CHUNK_WIDTH_VOXELS || checked.y >= CHUNK_WIDTH_VOXELS || checked.z >= CHUNK_HEIGHT_VOXELS)
         return 0;
-    for (int radius = 1; radius < max_search_radius; radius++) {
-        /* Offset from the checked voxel */
-        ivec3 curOffset;
+    */
+    for (int radius = 1; radius <= max_search_radius; radius++) {
+
+        /* Currently checked voxel */
+        ivec3 curVoxel = checked;
+
         /* +X Plane */
-        curOffset.x = checked.x + radius;
-        if (curOffset.x < CHUNK_WIDTH_VOXELS) {
-            for (curOffset.y = max(0, checked.y - radius); (curOffset.y < checked.y + radius) && (curOffset.y < CHUNK_WIDTH_VOXELS); curOffset.y++) {
-                for (curOffset.z = max(0, checked.z - radius); (curOffset.z < checked.z + radius) && (curOffset.z < CHUNK_HEIGHT_VOXELS); curOffset.z++) {
-                    if (getVoxel(curOffset) < 0)
+        curVoxel.x = checked.x + radius;
+        if (curVoxel.x < CHUNK_WIDTH_VOXELS) {
+            for (curVoxel.y = max(0, checked.y - radius); (curVoxel.y <= (checked.y + radius)) && (curVoxel.y < CHUNK_WIDTH_VOXELS); curVoxel.y++) {
+                for (curVoxel.z = max(0, checked.z - radius); (curVoxel.z <= (checked.z + radius)) && (curVoxel.z < CHUNK_HEIGHT_VOXELS); curVoxel.z++) {
+                    if (getVoxel(curVoxel) < 0)
                         return radius - 1;
                 }
             }
         }
         /* -X Plane */
-        curOffset.x = checked.x - radius;
-        if (curOffset.x > 0) {
-            for (curOffset.y = max(0, checked.y - radius); (curOffset.y < checked.y + radius) && (curOffset.y < CHUNK_WIDTH_VOXELS); curOffset.y++) {
-                for (curOffset.z = max(0, checked.z - radius); (curOffset.z < checked.z + radius) && (curOffset.z < CHUNK_HEIGHT_VOXELS); curOffset.z++) {
-                    if (getVoxel(curOffset) < 0)
+        curVoxel.x = checked.x - radius;
+        if (curVoxel.x > 0) {
+            for (curVoxel.y = max(0, checked.y - radius); (curVoxel.y <= (checked.y + radius)) && (curVoxel.y < CHUNK_WIDTH_VOXELS); curVoxel.y++) {
+                for (curVoxel.z = max(0, checked.z - radius); (curVoxel.z <= (checked.z + radius)) && (curVoxel.z < CHUNK_HEIGHT_VOXELS); curVoxel.z++) {
+                    if (getVoxel(curVoxel) < 0)
                         return radius - 1;
                 }
             }
         }
         /* +Y Plane */
-        curOffset.y = checked.y + radius;
-        if (curOffset.y < CHUNK_WIDTH_VOXELS) {
-            for (curOffset.x = max(0, checked.x - radius + 1); (curOffset.x < checked.x + radius - 1) && (curOffset.x < CHUNK_WIDTH_VOXELS); curOffset.x++) {
-                for (curOffset.z = max(0, checked.z - radius); (curOffset.z < checked.z + radius) && (curOffset.z < CHUNK_HEIGHT_VOXELS); curOffset.z++) {
-                    if (getVoxel(curOffset) < 0)
+        curVoxel.y = checked.y + radius;
+        if (curVoxel.y < CHUNK_WIDTH_VOXELS) {
+            for (curVoxel.x = max(0, checked.x - radius + 1); (curVoxel.x < (checked.x + radius - 1)) && (curVoxel.x < CHUNK_WIDTH_VOXELS); curVoxel.x++) {
+                for (curVoxel.z = max(0, checked.z - radius); (curVoxel.z < (checked.z + radius)) && (curVoxel.z < CHUNK_HEIGHT_VOXELS); curVoxel.z++) {
+                    if (getVoxel(curVoxel) < 0)
                         return radius - 1;
                 }
             }
         }
         /* -Y Plane */
-        curOffset.y = checked.y - radius;
-        if (curOffset.y > 0) {
-            for (curOffset.x = max(0, checked.x - radius + 1); (curOffset.x < checked.x + radius - 1) && (curOffset.x < CHUNK_WIDTH_VOXELS); curOffset.x++) {
-                for (curOffset.z = max(0, checked.z - radius); (curOffset.z < checked.z + radius) && (curOffset.z < CHUNK_HEIGHT_VOXELS); curOffset.z++) {
-                    if (getVoxel(curOffset) < 0)
+        curVoxel.y = checked.y - radius;
+        if (curVoxel.y > 0) {
+            for (curVoxel.x = max(0, checked.x - radius + 1); (curVoxel.x < (checked.x + radius - 1)) && (curVoxel.x < CHUNK_WIDTH_VOXELS); curVoxel.x++) {
+                for (curVoxel.z = max(0, checked.z - radius); (curVoxel.z < (checked.z + radius)) && (curVoxel.z < CHUNK_HEIGHT_VOXELS); curVoxel.z++) {
+                    if (getVoxel(curVoxel) < 0)
                         return radius - 1;
                 }
             }
         }
         /* +Z Plane */
-        curOffset.z = checked.z + radius;
-        if (curOffset.z < CHUNK_HEIGHT_VOXELS) {
-            for (curOffset.x = max(0, checked.x - radius + 1); (curOffset.x < checked.x + radius - 1) && (curOffset.x < CHUNK_WIDTH_VOXELS); curOffset.x++) {
-                for (curOffset.y = max(0, checked.y - radius + 1); (curOffset.y < checked.y + radius - 1) && (curOffset.y < CHUNK_WIDTH_VOXELS); curOffset.y++) {
-                    if (getVoxel(curOffset) < 0)
+        curVoxel.z = checked.z + radius;
+        if (curVoxel.z < CHUNK_HEIGHT_VOXELS) {
+            for (curVoxel.x = max(0, checked.x - radius + 1); (curVoxel.x < (checked.x + radius - 1)) && (curVoxel.x < CHUNK_WIDTH_VOXELS); curVoxel.x++) {
+                for (curVoxel.y = max(0, checked.y - radius + 1); (curVoxel.y < (checked.y + radius - 1)) && (curVoxel.y < CHUNK_WIDTH_VOXELS); curVoxel.y++) {
+                    if (getVoxel(curVoxel) < 0)
                         return radius - 1;
                 }
             }
         }
         /* -Z Plane */
-        curOffset.z = checked.z - radius;
-        if (curOffset.z > 0) {
-            for (curOffset.x = max(0, checked.x - radius + 1); (curOffset.x < checked.x + radius - 1) && (curOffset.x < CHUNK_WIDTH_VOXELS); curOffset.x++) {
-                for (curOffset.y = max(0, checked.y - radius + 1); (curOffset.y < checked.y + radius - 1) && (curOffset.y < CHUNK_WIDTH_VOXELS); curOffset.y++) {
-                    if (getVoxel(curOffset) < 0)
+        curVoxel.z = checked.z - radius;
+        if (curVoxel.z > 0) {
+            for (curVoxel.x = max(0, checked.x - radius + 1); (curVoxel.x < (checked.x + radius - 1)) && (curVoxel.x < CHUNK_WIDTH_VOXELS); curVoxel.x++) {
+                for (curVoxel.y = max(0, checked.y - radius + 1); (curVoxel.y < (checked.y + radius - 1)) && (curVoxel.y < CHUNK_WIDTH_VOXELS); curVoxel.y++) {
+                    if (getVoxel(curVoxel) < 0)
                         return radius - 1;
                 }
             }
         }
     }
-    return 0; // Shouldn't happen unless entire map is empty or max search dist reached
+    return max_search_radius; // Shouldn't happen unless entire map is empty or max search dist reached
+}
+
+int findClosestVoxelSafe(ivec3 checked) {
+    for (int radius = 1; radius < max_search_radius; radius++) {
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -radius; y <= radius; y++) {
+                for (int z = -radius; z <= radius; z++) {
+                    if (x == radius || x == -radius || y == radius || y == -radius || z == radius || z == -radius) {
+                        ivec3 curPos = ivec3(checked.x + x, checked.y + y, checked.z + z);
+                        if (curPos.x >= 0 && curPos.x < CHUNK_WIDTH_VOXELS &&
+                            curPos.y >= 0 && curPos.y < CHUNK_WIDTH_VOXELS &&
+                            curPos.z >= 0 && curPos.z < CHUNK_HEIGHT_VOXELS) {
+                            int voxelAtPosition = getVoxel(curPos);
+                            if (voxelAtPosition < 0)
+                                return radius - 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return max_search_radius - 1;
 }
 
 layout(local_size_x = 16, local_size_y = 8, local_size_z = 8) in;

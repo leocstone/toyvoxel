@@ -2,9 +2,6 @@
 #include <GLFW/glfw3.h>
 
 //#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
-#define GLM_FORCE_RADIANS
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 
 #include <iostream>
 #include <stdexcept>
@@ -322,6 +319,18 @@ private:
     }
 
     void computeVoxelDistances() {
+        std::vector<VkFence> computeDistanceFences(MAX_FRAMES_IN_FLIGHT);
+
+        VkFenceCreateInfo computeFenceInfo {};
+        computeFenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        computeFenceInfo.flags = 0;
+
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            if (vkCreateFence(device, &computeFenceInfo, nullptr, &computeDistanceFences[i]) != VK_SUCCESS) {
+                throw std::runtime_error("Failed to create compute distance fences!");
+            }
+        }
+
         std::cout << "Computing voxel distances...";
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             VkCommandBufferBeginInfo beginInfo {};
@@ -355,13 +364,16 @@ private:
             computeDistancesSubmitInfo.pSignalSemaphores = nullptr;
 
             VkResult result;
-            if ((result = vkQueueSubmit(computeQueue, 1, &computeDistancesSubmitInfo, VK_NULL_HANDLE)) != VK_SUCCESS) {
+            if ((result = vkQueueSubmit(computeQueue, 1, &computeDistancesSubmitInfo, computeDistanceFences[i])) != VK_SUCCESS) {
                 std::cerr << string_VkResult(result) << std::endl;
                 throw std::runtime_error("Failed to submit compute distances command buffer");
             }
         }
 
-        vkQueueWaitIdle(computeQueue);
+        vkWaitForFences(device, MAX_FRAMES_IN_FLIGHT, computeDistanceFences.data(), VK_TRUE, UINT64_MAX);
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vkDestroyFence(device, computeDistanceFences[i], nullptr);
+        }
         std::cout << "done." << std::endl;
     }
 
@@ -668,8 +680,8 @@ private:
     void createTextureSampler() {
         VkSamplerCreateInfo samplerInfo {};
         samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.magFilter = VK_FILTER_NEAREST;
-        samplerInfo.minFilter = VK_FILTER_NEAREST;
+        samplerInfo.magFilter = VK_FILTER_LINEAR;
+        samplerInfo.minFilter = VK_FILTER_LINEAR;
 
         samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
         samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;

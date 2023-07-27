@@ -221,30 +221,13 @@ static VoxelChunk* erosionTest() {
     return result;
 }
 
-static VoxelChunk* axes() {
-    VoxelChunk* result = new VoxelChunk();
-    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
-        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
-            for (int z = 0; z < CHUNK_HEIGHT_VOXELS; z++) {
-                if (z == 0 || x == 0 || y == 0) {
-                    result->setVoxel(x, y, z, -1);
-                } else {
-                    result->setVoxel(x, y, z, 0);
-                }
-            }
-        }
-    }
-
-    return result;
-}
-
-static VoxelChunk* grassTest() {
+static VoxelChunk* grassTest(double minHeight) {
     VoxelChunk* result = new VoxelChunk();
     constexpr double scale_factor = 32.0;
     for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
         for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
             for (int z = 0; z < CHUNK_HEIGHT_VOXELS; z++) {
-                double height = CHUNK_HEIGHT_VOXELS - Perlin::octavePerlin(double(x) / scale_factor, double(y) / scale_factor, 55.0, 16, 0.5) * 1.5 * VOXELS_PER_METER - 2.0 * VOXELS_PER_METER;
+                double height = Perlin::octavePerlin(double(x) / scale_factor, double(y) / scale_factor, 55.0, 16, 0.5) * 3.0 + minHeight;
                 result->setVoxel(x, y, z, (z <= height) ? -3 : 0);
             }
         }
@@ -255,14 +238,151 @@ static VoxelChunk* grassTest() {
     return result;
 }
 
-static VoxelChunk* forestTest() {
-    VoxelChunk* result = new VoxelChunk();
+static float distanceFromCylinder(const glm::vec3& origin, float radius, const glm::vec3& point) {
+    // Disregard Z
+    glm::vec3 originXY = origin;
+    originXY.z = 0.0;
+    glm::vec3 pointXY = point;
+    pointXY.z = 0.0;
+    glm::vec3 s = glm::vec3(pointXY - originXY);
+    float result = glm::length(s) - radius;
+    //std::cout << "point-origin: (" << s.x << ", " << s.y << ", " << s.z << ") length=" << glm::length(s) << ". Distance from (" << point.x << ", " << point.y << ", " << point.z << "): " << result << std::endl;
+    return result;
+}
+
+static float distanceFromSphere(const glm::vec3& origin, float radius, const glm::vec3& point) {
+    return glm::length(point - origin) - radius;
+}
+
+/* Copied from iq */
+static float sdCappedCylinder( glm::vec3 p, glm::vec3 a, glm::vec3 b, float r )
+{
+  glm::vec3  ba = b - a;
+  glm::vec3  pa = p - a;
+  float baba = glm::dot(ba,ba);
+  float paba = glm::dot(pa,ba);
+  float x = glm::length(pa*baba-ba*paba) - r*baba;
+  float y = glm::abs(paba-baba*0.5)-baba*0.5;
+  float x2 = x*x;
+  float y2 = y*y*baba;
+  float d = (glm::max(x,y)<0.0)?-glm::min(x2,y2):(((x>0.0)?x2:0.0)+((y>0.0)?y2:0.0));
+  return glm::sign(d)*glm::sqrt(glm::abs(d))/baba;
+}
+
+static float horizontalCylinder(const glm::vec3& origin, float radius, const glm::vec3& point) {
+    return 0;
+}
+
+static float curvedSharpCylinder(const glm::vec3& a, const glm::vec3& b, float radius, const glm::vec3& point,
+                                 float curveFactor, const glm::vec3& curveDirection, float sharpness) {
+    glm::vec3 transformedPoint = point;
+
+    glm::vec3 b_a = b - a;
+    glm::vec3 p_a = point - a;
+    float distanceTraveledAlongCylinder = 0.0f;
+
+    return sdCappedCylinder(transformedPoint, a, b, radius);
+}
+
+/*
+Copied from iq
+Smoothed union of two SDFS
+d1 - distance to SDF 1
+d2 - distance to SDF 2
+k  - smoothing amount
+*/
+static float opSmoothUnion( float d1, float d2, float k ) {
+    float h = glm::clamp( 0.5 + 0.5*(d2-d1)/k, 0.0, 1.0 );
+    return glm::mix( d2, d1, h ) - k*h*(1.0-h);
+}
+
+/*
+Tree
+*/
+static VoxelFragment* tree() {
+    const float initialTrunkRadius = 1.0f * VOXELS_PER_METER;
+    const int height = 10;
+    float radius = initialTrunkRadius;
+
+    VoxelFragment* result = new VoxelFragment(VOXELS_PER_METER * 4, VOXELS_PER_METER * 4, VOXELS_PER_METER * height);
+
+    glm::vec3 origin(result->sizeX / 2.0f, result->sizeY / 2.0f, 0.0f);
+    glm::vec3 halfVoxel(0.5f, 0.5f, 0.5f);
+    float curRotation = 0.02f;
+    //std::cout << "Cylinder is at (" << origin.x << ", " << origin.y << ", " << origin.z << ") with radius " << initialTrunkRadius << std::endl;
+    for (int x = 0; x < result->sizeX; x++) {
+        for (int y = 0; y < result->sizeY; y++) {
+            for (int z = 0; z < result->sizeZ; z++) {
+                float curRadius = initialTrunkRadius;
+                if (z > 100) {
+                    curRadius = initialTrunkRadius * 0.9;
+                }
+                glm::vec4 curPoint(glm::vec3(x, y, z) + halfVoxel, 1);
+                glm::mat4 r = glm::mat4(1.0);
+                r = glm::rotate(r, curRotation, glm::vec3(0, 1, 0));
+                curPoint = r * curPoint;
+                float distSample = opSmoothUnion(opSmoothUnion(distanceFromSphere(glm::vec3(origin.x, origin.y - initialTrunkRadius + 1.0, 50.0), 3.0, curPoint),
+                                                               distanceFromSphere(glm::vec3(origin.x, origin.y, 0), initialTrunkRadius * 1.1, curPoint), 0.8),
+                                                 opSmoothUnion(distanceFromCylinder(origin, curRadius, curPoint),
+                                                               distanceFromSphere(glm::vec3(origin.x, origin.y, 100.0), initialTrunkRadius * 1.02, curPoint), 0.8), 0.8);
+                if (distSample < 0.0f && distSample > -1.8f) {
+                    result->setVoxel(x, y, z, -4);
+                } else if (distSample < -1.8f) {
+                    result->setVoxel(x, y, z, -5);
+                } else {
+                    result->setVoxel(x, y, z, 0);
+                }
+            }
+        }
+    }
 
     return result;
 }
 
+/*
+Copy voxels from src into dst at offset
+*/
+static void blitVoxels(VoxelChunk* dst, VoxelFragment* src, int sx, int sy, int sz) {
+    for (int x = 0; (x + sx < CHUNK_WIDTH_VOXELS) && (x < src->sizeX); x++) {
+        for (int y = 0; (y + sy < CHUNK_WIDTH_VOXELS) && (y < src->sizeY); y++) {
+            for (int z = 0; (z + sz < CHUNK_HEIGHT_VOXELS) && (z < src->sizeZ); z++) {
+                int dstIndex = (sx + x) + (sy + y) * CHUNK_WIDTH_VOXELS + (sz + z) * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS;
+                int srcIndex = x + y * src->sizeX + z * src->sizeX * src->sizeY;
+                if (src->voxels[srcIndex] < 0) {
+                    dst->voxels[dstIndex] = src->voxels[srcIndex];
+                }
+            }
+        }
+    }
+}
+
+static VoxelChunk* forestTest() {
+    double grassHeight = 3;
+    VoxelChunk* dst = grassTest(grassHeight);
+    /*
+    for (int x = 0; x < VOXELS_PER_METER; x++) {
+        for (int y = 0; y < VOXELS_PER_METER; y++) {
+            for (int z = 0; z < VOXELS_PER_METER; z++) {
+                if ((x * x + y * y) < 64) {
+                    result->setVoxel(x, y, z, -4);
+                } else {
+                    result->setVoxel(x, y, z, 0);
+                }
+                result->setVoxel(x, y, z, -4);
+            }
+        }
+    }
+    */
+
+    VoxelFragment* src = tree();
+    blitVoxels(dst, src, CHUNK_WIDTH_VOXELS / 2, CHUNK_WIDTH_VOXELS / 2, int(grassHeight));
+    delete[] src->voxels;
+
+    return dst;
+}
+
 VoxelChunk* WorldGenerator::generateChunk() {
-    VoxelChunk* result = basicPerlinTest();
+    VoxelChunk* result = forestTest();
     //computeDistances(result);
     return result;
 }
