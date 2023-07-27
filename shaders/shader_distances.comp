@@ -1,7 +1,7 @@
 #version 450
 
-const int CHUNK_WIDTH_METERS = 8;
-const int CHUNK_HEIGHT_METERS = 32;
+const int CHUNK_WIDTH_METERS = 16;
+const int CHUNK_HEIGHT_METERS = 16;
 const int VOXELS_PER_METER = 16;
 const int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
 const int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
@@ -135,6 +135,7 @@ int findClosestVoxelSafe(ivec3 checked) {
 layout(local_size_x = 16, local_size_y = 8, local_size_z = 8) in;
 
 void main() {
+    //return;
     if (getVoxel(ivec3(gl_GlobalInvocationID)) == 0) {
         setVoxel(ivec3(gl_GlobalInvocationID), findClosestVoxel(ivec3(gl_GlobalInvocationID)));
     }

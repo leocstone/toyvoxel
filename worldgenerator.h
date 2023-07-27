@@ -3,7 +3,9 @@
 #include <cstdint>
 #include <algorithm>
 #include "perlin.h"
-#include "sdf/sdf.h"
+#include "sdf/sdfchain.h"
+#include "sdf/primitive.h"
+#include "sdf/displacement.h"
 
 /*
 Structure:
@@ -14,9 +16,9 @@ if 0, there is no voxel here and no distance information
 typedef int32_t Voxel;
 
 // A chunk is 16x16 meters XY
-constexpr int CHUNK_WIDTH_METERS = 8;
+constexpr int CHUNK_WIDTH_METERS = 16;
 // and 256 meters tall
-constexpr int CHUNK_HEIGHT_METERS = 32;
+constexpr int CHUNK_HEIGHT_METERS = 16;
 // There are 8 voxels in 1 meter
 constexpr int VOXELS_PER_METER = 16;
 

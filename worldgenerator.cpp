@@ -221,114 +221,119 @@ static VoxelChunk* erosionTest() {
     return result;
 }
 
+static int randomGrassBend(int b) {
+    if (b >= 9) {
+        return 1;
+    } else if (b >= 7) {
+        return -1;
+    }
+    return 0;
+}
+
 static VoxelChunk* grassTest(double minHeight) {
     VoxelChunk* result = new VoxelChunk();
     constexpr double scale_factor = 32.0;
     for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
         for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
             for (int z = 0; z < CHUNK_HEIGHT_VOXELS; z++) {
-                double height = Perlin::octavePerlin(double(x) / scale_factor, double(y) / scale_factor, 55.0, 16, 0.5) * 3.0 + minHeight;
-                result->setVoxel(x, y, z, (z <= height) ? -3 : 0);
+                double height = 3.0;//Perlin::octavePerlin(double(x) / scale_factor, double(y) / scale_factor, 55.0, 16, 0.5) * 3.0 + minHeight;
+                result->setVoxel(x, y, z, (z <= height) ? -2 : 0);
             }
         }
-        std::cout << "\rGenerating grass voxels: " << x + 1 << " / " << CHUNK_WIDTH_VOXELS;
+        //std::cout << "\rGenerating dirt voxels: " << x + 1 << " / " << CHUNK_WIDTH_VOXELS;
     }
-    std::cout << " done." << std::endl;
+    //std::cout << " done." << std::endl;
+
+    // Grass
+    constexpr int num_grass_blades = int(float(CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS) * 0.9);
+    constexpr int max_height_voxels = 8;
+    std::uniform_int_distribution<int> randomCoord(0, CHUNK_WIDTH_VOXELS - 1);
+    std::uniform_int_distribution<int> randomHeight(1, max_height_voxels);
+    std::uniform_int_distribution<int> randomBend(0, 10);
+    for (int i = 0; i < num_grass_blades; i++) {
+        int randomX = randomCoord(rng);
+        int randomY = randomCoord(rng);
+        int totalBendX = 0;
+        int totalBendY = 0;
+        int bendDirX = randomGrassBend(randomBend(rng));
+        int bendDirY = randomGrassBend(randomBend(rng));
+        int randomBladeHeight = randomHeight(rng);
+        result->setVoxel(randomX, randomY, 3, -3);
+        for (int h = 1; h < randomBladeHeight; h++) {
+            int bendX = randomBend(rng) - h;
+            if (bendX >= 8 && totalBendX == 0 && totalBendY == 0) {
+                totalBendX += bendDirX;
+            }
+            int bendY = randomBend(rng) - h;
+            if (bendY >= 8 && totalBendX == 0 && totalBendY == 0) {
+                totalBendY += bendDirY;
+            }
+            int placedX = std::clamp(randomX + totalBendX, 0, CHUNK_WIDTH_VOXELS - 1);
+            int placedY = std::clamp(randomY + totalBendY, 0, CHUNK_WIDTH_VOXELS - 1);
+            result->setVoxel(placedX, placedY, 3 + h, -3);
+        }
+    }
 
     return result;
 }
 
-static float distanceFromCylinder(const glm::vec3& origin, float radius, const glm::vec3& point) {
-    // Disregard Z
-    glm::vec3 originXY = origin;
-    originXY.z = 0.0;
-    glm::vec3 pointXY = point;
-    pointXY.z = 0.0;
-    glm::vec3 s = glm::vec3(pointXY - originXY);
-    float result = glm::length(s) - radius;
-    //std::cout << "point-origin: (" << s.x << ", " << s.y << ", " << s.z << ") length=" << glm::length(s) << ". Distance from (" << point.x << ", " << point.y << ", " << point.z << "): " << result << std::endl;
-    return result;
-}
-
-static float distanceFromSphere(const glm::vec3& origin, float radius, const glm::vec3& point) {
-    return glm::length(point - origin) - radius;
-}
-
-/* Copied from iq */
-static float sdCappedCylinder( glm::vec3 p, glm::vec3 a, glm::vec3 b, float r )
-{
-  glm::vec3  ba = b - a;
-  glm::vec3  pa = p - a;
-  float baba = glm::dot(ba,ba);
-  float paba = glm::dot(pa,ba);
-  float x = glm::length(pa*baba-ba*paba) - r*baba;
-  float y = glm::abs(paba-baba*0.5)-baba*0.5;
-  float x2 = x*x;
-  float y2 = y*y*baba;
-  float d = (glm::max(x,y)<0.0)?-glm::min(x2,y2):(((x>0.0)?x2:0.0)+((y>0.0)?y2:0.0));
-  return glm::sign(d)*glm::sqrt(glm::abs(d))/baba;
-}
-
-static float horizontalCylinder(const glm::vec3& origin, float radius, const glm::vec3& point) {
-    return 0;
-}
-
-static float curvedSharpCylinder(const glm::vec3& a, const glm::vec3& b, float radius, const glm::vec3& point,
-                                 float curveFactor, const glm::vec3& curveDirection, float sharpness) {
-    glm::vec3 transformedPoint = point;
-
-    glm::vec3 b_a = b - a;
-    glm::vec3 p_a = point - a;
-    float distanceTraveledAlongCylinder = 0.0f;
-
-    return sdCappedCylinder(transformedPoint, a, b, radius);
-}
-
 /*
-Copied from iq
-Smoothed union of two SDFS
-d1 - distance to SDF 1
-d2 - distance to SDF 2
-k  - smoothing amount
+Returns a voxel fragment contained within an AABB from origin to dimensions
 */
-static float opSmoothUnion( float d1, float d2, float k ) {
-    float h = glm::clamp( 0.5 + 0.5*(d2-d1)/k, 0.0, 1.0 );
-    return glm::mix( d2, d1, h ) - k*h*(1.0-h);
-}
+static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
+    VoxelFragment* result = new VoxelFragment(VOXELS_PER_METER * glm::ceil(dimensions.x),
+                                              VOXELS_PER_METER * glm::ceil(dimensions.y),
+                                              VOXELS_PER_METER * glm::ceil(dimensions.z));
 
-/*
-Tree
-*/
-static VoxelFragment* tree() {
-    const float initialTrunkRadius = 1.0f * VOXELS_PER_METER;
-    const int height = 10;
-    float radius = initialTrunkRadius;
+    // Constants
+    const glm::vec3 center(dimensions.x / 2.0f, dimensions.y / 2.0f, 0.0);
+    const glm::vec3 voxelCenter(0.5 / float(VOXELS_PER_METER), 0.5 / float(VOXELS_PER_METER), 0.5 / float(VOXELS_PER_METER));
+    const float initialTreeRadius = glm::min(dimensions.x, dimensions.y) / 4.0;
 
-    VoxelFragment* result = new VoxelFragment(VOXELS_PER_METER * 4, VOXELS_PER_METER * 4, VOXELS_PER_METER * height);
+    // SDF chain representing tree
+    SDFChain treeChain;
+    // Base of tree (roots)
+    SDFLink roots;
+    SDFSphere rootSphere(initialTreeRadius);
+    roots.s = (SDF*)&rootSphere;
+    SDFTransformOp t;
+    t.addScale(glm::vec3(0.95, 1.0, 0.2));
+    t.addTranslation(glm::vec3(center));
+    roots.t = t;
+    roots.c = nullptr; // Not used for first SDF in chain
+    treeChain.addLink(roots);
+    // Trunk
+    SDFLink trunk;
+    SDFSmoothUnion smooth(0.8f);
+    glm::vec3 trunkEnd = center;
+    trunkEnd.z += dimensions.z / 2.0;
+    SDFCylinder trunkCylinder(center, trunkEnd, initialTreeRadius * 0.9);
+    SDFTransformOp trunkT;
+    trunkT.addRotation(0.05, glm::vec3(1, 0, 0));
+    trunkT.addRotation(0.07, glm::vec3(0, 1, 0));
+    trunk.c = &smooth;
+    trunk.s = &trunkCylinder;
+    trunk.t = trunkT;
+    treeChain.addLink(trunk);
+    // Make the trunk less cylindrical
+    SDFLink trunkDisplacement;
+    SDFDisplace displace;
+    SDFSineDisplacement barkRoughness(glm::vec3(1.0, 1.0, 0.2), 0.05);
+    trunkDisplacement.c = &displace;
+    trunkDisplacement.s = (SDF*)&barkRoughness;
+    trunkDisplacement.t = t;
+    treeChain.addLink(trunkDisplacement);
 
-    glm::vec3 origin(result->sizeX / 2.0f, result->sizeY / 2.0f, 0.0f);
-    glm::vec3 halfVoxel(0.5f, 0.5f, 0.5f);
-    float curRotation = 0.02f;
-    //std::cout << "Cylinder is at (" << origin.x << ", " << origin.y << ", " << origin.z << ") with radius " << initialTrunkRadius << std::endl;
+
     for (int x = 0; x < result->sizeX; x++) {
         for (int y = 0; y < result->sizeY; y++) {
             for (int z = 0; z < result->sizeZ; z++) {
-                float curRadius = initialTrunkRadius;
-                if (z > 100) {
-                    curRadius = initialTrunkRadius * 0.9;
-                }
-                glm::vec4 curPoint(glm::vec3(x, y, z) + halfVoxel, 1);
-                glm::mat4 r = glm::mat4(1.0);
-                r = glm::rotate(r, curRotation, glm::vec3(0, 1, 0));
-                curPoint = r * curPoint;
-                float distSample = opSmoothUnion(opSmoothUnion(distanceFromSphere(glm::vec3(origin.x, origin.y - initialTrunkRadius + 1.0, 50.0), 3.0, curPoint),
-                                                               distanceFromSphere(glm::vec3(origin.x, origin.y, 0), initialTrunkRadius * 1.1, curPoint), 0.8),
-                                                 opSmoothUnion(distanceFromCylinder(origin, curRadius, curPoint),
-                                                               distanceFromSphere(glm::vec3(origin.x, origin.y, 100.0), initialTrunkRadius * 1.02, curPoint), 0.8), 0.8);
-                if (distSample < 0.0f && distSample > -1.8f) {
+                glm::vec3 curPoint(float(x) / float(VOXELS_PER_METER) + voxelCenter.x,
+                                   float(y) / float(VOXELS_PER_METER) + voxelCenter.y,
+                                   float(z) / float(VOXELS_PER_METER) + voxelCenter.z);
+                float distSample = treeChain.dist(curPoint);
+                if (distSample < 0.0f) {
                     result->setVoxel(x, y, z, -4);
-                } else if (distSample < -1.8f) {
-                    result->setVoxel(x, y, z, -5);
                 } else {
                     result->setVoxel(x, y, z, 0);
                 }
@@ -373,9 +378,9 @@ static VoxelChunk* forestTest() {
         }
     }
     */
-
-    VoxelFragment* src = tree();
-    blitVoxels(dst, src, CHUNK_WIDTH_VOXELS / 2, CHUNK_WIDTH_VOXELS / 2, int(grassHeight));
+    const glm::vec3 treeDimensions(3, 3, 10);
+    VoxelFragment* src = proceduralTree(treeDimensions);
+    blitVoxels(dst, src, CHUNK_WIDTH_VOXELS / 2 - (treeDimensions.x / 2) * VOXELS_PER_METER, CHUNK_WIDTH_VOXELS / 2 - (treeDimensions.y / 2) * VOXELS_PER_METER, int(grassHeight));
     delete[] src->voxels;
 
     return dst;

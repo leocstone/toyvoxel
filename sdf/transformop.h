@@ -12,7 +12,7 @@ public:
 
     glm::vec3 operator()(const glm::vec3& point) const {
         glm::vec4 tv(point, 1);
-        tv = transformMat * tv;
+        tv = glm::inverse(transformMat) * tv;
         return glm::vec3(tv.x, tv.y, tv.z);
     }
 
