@@ -1,17 +1,19 @@
 #version 450
 
 const int CHUNK_WIDTH_METERS = 16;
-const int CHUNK_HEIGHT_METERS = 16;
+const int CHUNK_HEIGHT_METERS = 32;
 const int VOXELS_PER_METER = 16;
 const int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
 const int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
 
+/*
 struct VoxelChunk {
     int voxels[CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * CHUNK_HEIGHT_VOXELS];
 };
+*/
 
-layout(std430, binding = 0) buffer VoxelChunkIn {
-    VoxelChunk chunkIn;
+layout(std430, binding = 0, row_major) buffer VoxelChunkIn {
+    int voxels[CHUNK_WIDTH_VOXELS][CHUNK_WIDTH_VOXELS][CHUNK_HEIGHT_VOXELS];
 };
 
 int flatIndex(ivec3 coord) {
@@ -19,22 +21,30 @@ int flatIndex(ivec3 coord) {
 }
 
 int getVoxel(ivec3 coord) {
-    if (coord.x < 0 || coord.x >= CHUNK_WIDTH_VOXELS || coord.y < 0 || coord.y >= CHUNK_WIDTH_VOXELS || coord.z < 0 || coord.z >= CHUNK_HEIGHT_VOXELS) {
+    if ((coord.x < 0) ||
+        (coord.x >= CHUNK_WIDTH_VOXELS) ||
+        (coord.y < 0) ||
+        (coord.y >= CHUNK_WIDTH_VOXELS) ||
+        (coord.z < 0) ||
+        (coord.z >= CHUNK_HEIGHT_VOXELS)) {
         return 0;
     }
-
-    return chunkIn.voxels[flatIndex(coord)];
+    return voxels[coord.x][coord.y][coord.z];
 }
 
 void setVoxel(ivec3 coord, int v) {
-    if (coord.x < 0 || coord.x >= CHUNK_WIDTH_VOXELS || coord.y < 0 || coord.y >= CHUNK_WIDTH_VOXELS || coord.z < 0 || coord.z >= CHUNK_HEIGHT_VOXELS) {
+    if ((coord.x < 0) ||
+        (coord.x >= CHUNK_WIDTH_VOXELS) ||
+        (coord.y < 0) ||
+        (coord.y >= CHUNK_WIDTH_VOXELS) ||
+        (coord.z < 0) ||
+        (coord.z >= CHUNK_HEIGHT_VOXELS)) {
         return;
     }
-
-    chunkIn.voxels[flatIndex(coord)] = v;
+    voxels[coord.x][coord.y][coord.z] = v;
 }
 
-const int max_search_radius = 4;
+const int max_search_radius = 2;
 int findClosestVoxel(ivec3 checked) {
     /*
     if (checked.x < 0 || checked.y < 0 || checked.z < 0 ||
@@ -42,10 +52,9 @@ int findClosestVoxel(ivec3 checked) {
         return 0;
     */
     for (int radius = 1; radius <= max_search_radius; radius++) {
-
         /* Currently checked voxel */
         ivec3 curVoxel = checked;
-
+        //int minDistanceFound = max_search_radius; // Minimum distance value found in a voxel at this radius
         /* +X Plane */
         curVoxel.x = checked.x + radius;
         if (curVoxel.x < CHUNK_WIDTH_VOXELS) {
@@ -110,6 +119,7 @@ int findClosestVoxel(ivec3 checked) {
     return max_search_radius; // Shouldn't happen unless entire map is empty or max search dist reached
 }
 
+/*
 int findClosestVoxelSafe(ivec3 checked) {
     for (int radius = 1; radius < max_search_radius; radius++) {
         for (int x = -radius; x <= radius; x++) {
@@ -131,8 +141,9 @@ int findClosestVoxelSafe(ivec3 checked) {
     }
     return max_search_radius - 1;
 }
+*/
 
-layout(local_size_x = 16, local_size_y = 8, local_size_z = 8) in;
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 4) in;
 
 void main() {
     //return;

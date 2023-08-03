@@ -24,7 +24,7 @@
 #include "worldgenerator.h"
 
 struct Camera {
-    alignas(16) glm::vec3 position = glm::vec3(CHUNK_WIDTH_METERS / 2.0, CHUNK_WIDTH_METERS / 2.0, CHUNK_HEIGHT_METERS / 2.0);
+    alignas(16) glm::vec3 position = glm::vec3(-32.3128, 29.9501, 16.8475);
     alignas(16) glm::vec3 forward = glm::vec3(0, 1, 0);
     alignas(16) glm::vec3 up = glm::vec3(0, 0, 1);
     alignas(16) glm::vec3 right = glm::vec3(1, 0, 0);
@@ -124,7 +124,7 @@ static std::vector<char> readFile(const std::string& filename) {
     return buffer;
 }
 
-class HelloTriangleApplication {
+class Game {
 public:
     void run() {
         initWindow();
@@ -217,8 +217,8 @@ private:
     double cursorY;
     double cursorLastX;
     double cursorLastY;
-    double cameraRotY = 0.0;
-    double cameraRotZ = 0.0;
+    double cameraRotY = -0.0240741;
+    double cameraRotZ = -0.486458;
     static constexpr double minPitch = -1.5;
     static constexpr double maxPitch = 1.5;
     static constexpr double sensitivity = 2.0;
@@ -228,7 +228,7 @@ private:
     bool shouldQuit = false;
 
     static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-        HelloTriangleApplication* app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        Game* app = reinterpret_cast<Game*>(glfwGetWindowUserPointer(window));
         if (key <= GLFW_KEY_LAST && key >= 0) {
             switch(action) {
             case GLFW_PRESS:
@@ -248,7 +248,7 @@ private:
     }
 
     static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
-        HelloTriangleApplication* app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        Game* app = reinterpret_cast<Game*>(glfwGetWindowUserPointer(window));
 
         app->cursorLastX = app->cursorX;
         app->cursorLastY = app->cursorY;
@@ -276,7 +276,7 @@ private:
     }
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
-        auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        auto app = reinterpret_cast<Game*>(glfwGetWindowUserPointer(window));
         app->framebufferResized = true;
     }
 
@@ -343,7 +343,7 @@ private:
             vkCmdBindPipeline(computeDistancesCommandBuffers[i], VK_PIPELINE_BIND_POINT_COMPUTE, computeDistancesPipeline);
             vkCmdBindDescriptorSets(computeDistancesCommandBuffers[i], VK_PIPELINE_BIND_POINT_COMPUTE, computeDistancesPipelineLayout,
                                     0, 1, &computeDistancesDescriptorSets[i], 0, nullptr);
-            vkCmdDispatch(computeDistancesCommandBuffers[i], CHUNK_WIDTH_VOXELS / 16, CHUNK_WIDTH_VOXELS / 8, CHUNK_HEIGHT_VOXELS / 8);
+            vkCmdDispatch(computeDistancesCommandBuffers[i], CHUNK_WIDTH_VOXELS / 8, CHUNK_WIDTH_VOXELS / 8, CHUNK_HEIGHT_VOXELS / 4);
 
             if (vkEndCommandBuffer(computeDistancesCommandBuffers[i]) != VK_SUCCESS) {
                 throw std::runtime_error("Failed to record compute distances command buffer!");
@@ -2152,11 +2152,8 @@ private:
         if (keyPressed[GLFW_KEY_LEFT_SHIFT])
             moveSpeed = 10.0f;
         camera.position += moveDirection * deltaTime * moveSpeed;
-        /*
-        std::cout << "deltaTime: " << deltaTime << std::endl;
-        std::cout << "Camera: " << camera.position.x << ", " << camera.position.y << ", " << camera.position.z << std::endl;
-        std::cout << "W: " << keyPressed[GLFW_KEY_W] << " A: " << keyPressed[GLFW_KEY_A] << " S: " << keyPressed[GLFW_KEY_S] << " D: " << keyPressed[GLFW_KEY_D] << std::endl;
-        */
+        //std::cout << "Camera: " << camera.position.x << ", " << camera.position.y << ", " << camera.position.z << std::endl;
+        //std::cout << "Rot Z: " << cameraRotZ << " Rot Y: " << cameraRotY << std::endl;
         //std::cout << "x: " << cursorDeltaX << " y: " << cursorDeltaY << std::endl;
         camera.sunDirection = glm::normalize(glm::vec3(0.1 * glm::sin(camera.cur_time) + 1, 0.1 * glm::cos(camera.cur_time) + 1, 0.1 * glm::sin(camera.cur_time) - 1));
 
@@ -2333,7 +2330,7 @@ private:
 };
 
 int main() {
-    HelloTriangleApplication app;
+    Game app;
 
     try {
         app.run();

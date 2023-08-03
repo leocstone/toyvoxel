@@ -232,12 +232,30 @@ static int randomGrassBend(int b) {
 
 static VoxelChunk* grassTest(double minHeight) {
     VoxelChunk* result = new VoxelChunk();
-    constexpr double scale_factor = 32.0;
+    const float allStoneHeight = minHeight * 0.1f; // Everything below 10% of minHeight is all stone
+    std::uniform_int_distribution<int> stoneChance(0, 500);
+    constexpr double stone_scale_factor = 32.0;
     for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
         for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
-            for (int z = 0; z < CHUNK_HEIGHT_VOXELS; z++) {
-                double height = 3.0;//Perlin::octavePerlin(double(x) / scale_factor, double(y) / scale_factor, 55.0, 16, 0.5) * 3.0 + minHeight;
-                result->setVoxel(x, y, z, (z <= height) ? -2 : 0);
+            for (int z = 0; z < minHeight; z++) {
+                if (z <= allStoneHeight) {
+                    double stoneHeight = Perlin::perlin(x / stone_scale_factor, y / stone_scale_factor, 55);
+                    if (z < (stoneHeight * allStoneHeight)) {
+                        result->setVoxel(x, y, z, -4);
+                        continue;
+                    } else {
+                        result->setVoxel(x, y, z, -2);
+                    }
+                }
+                double height = minHeight;
+                float isStone = float(stoneChance(rng)) / 1000.0f;
+                isStone *= isStone;
+                float stoneChanceForZ = float(z) / float(CHUNK_HEIGHT_VOXELS);
+                if (isStone > stoneChanceForZ) {
+                    result->setVoxel(x, y, z, -4);
+                } else {
+                    result->setVoxel(x, y, z, -2);
+                }
             }
         }
         //std::cout << "\rGenerating dirt voxels: " << x + 1 << " / " << CHUNK_WIDTH_VOXELS;
@@ -258,7 +276,7 @@ static VoxelChunk* grassTest(double minHeight) {
         int bendDirX = randomGrassBend(randomBend(rng));
         int bendDirY = randomGrassBend(randomBend(rng));
         int randomBladeHeight = randomHeight(rng);
-        result->setVoxel(randomX, randomY, 3, -3);
+        result->setVoxel(randomX, randomY, minHeight, -3);
         for (int h = 1; h < randomBladeHeight; h++) {
             int bendX = randomBend(rng) - h;
             if (bendX >= 8 && totalBendX == 0 && totalBendY == 0) {
@@ -270,7 +288,7 @@ static VoxelChunk* grassTest(double minHeight) {
             }
             int placedX = std::clamp(randomX + totalBendX, 0, CHUNK_WIDTH_VOXELS - 1);
             int placedY = std::clamp(randomY + totalBendY, 0, CHUNK_WIDTH_VOXELS - 1);
-            result->setVoxel(placedX, placedY, 3 + h, -3);
+            result->setVoxel(placedX, placedY, minHeight + h, -3);
         }
     }
 
@@ -285,10 +303,14 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
                                               VOXELS_PER_METER * glm::ceil(dimensions.y),
                                               VOXELS_PER_METER * glm::ceil(dimensions.z));
 
+    std::uniform_int_distribution<int> randomTrunkHeight(70, 75); // Trunk is 70-75% of available vertical space
+
     // Constants
     const glm::vec3 center(dimensions.x / 2.0f, dimensions.y / 2.0f, 0.0);
     const glm::vec3 voxelCenter(0.5 / float(VOXELS_PER_METER), 0.5 / float(VOXELS_PER_METER), 0.5 / float(VOXELS_PER_METER));
     const float initialTreeRadius = glm::min(dimensions.x, dimensions.y) / 4.0;
+    const float trunkHeight = dimensions.z * (float(randomTrunkHeight(rng)) / 100.0f);
+    const float max_branch_length = 3.0f;
 
     // SDF chain representing tree
     SDFChain treeChain;
@@ -303,27 +325,64 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
     roots.c = nullptr; // Not used for first SDF in chain
     treeChain.addLink(roots);
     // Trunk
-    SDFLink trunk;
-    SDFSmoothUnion smooth(0.8f);
+    //SDFSmoothUnion smooth(0.8f);
+    SDFUnion smooth;
     glm::vec3 trunkEnd = center;
-    trunkEnd.z += dimensions.z / 2.0;
-    SDFCylinder trunkCylinder(center, trunkEnd, initialTreeRadius * 0.9);
+    trunkEnd.z += trunkHeight;
+    SDFCappedCone trunkCylinder(center, trunkEnd, initialTreeRadius * 0.9, initialTreeRadius * 0.9 * (1.0 - trunkHeight * 0.01));
     SDFTransformOp trunkT;
-    trunkT.addRotation(0.05, glm::vec3(1, 0, 0));
-    trunkT.addRotation(0.07, glm::vec3(0, 1, 0));
-    trunk.c = &smooth;
-    trunk.s = &trunkCylinder;
-    trunk.t = trunkT;
-    treeChain.addLink(trunk);
-    // Make the trunk less cylindrical
-    SDFLink trunkDisplacement;
-    SDFDisplace displace;
-    SDFSineDisplacement barkRoughness(glm::vec3(1.0, 1.0, 0.2), 0.05);
-    trunkDisplacement.c = &displace;
-    trunkDisplacement.s = (SDF*)&barkRoughness;
-    trunkDisplacement.t = t;
-    treeChain.addLink(trunkDisplacement);
+    std::uniform_int_distribution<int> randomRotation(-3, 3);
+    trunkT.addRotation(float(randomRotation(rng)) / 100.0f, glm::vec3(1, 0, 0));
+    trunkT.addRotation(float(randomRotation(rng)) / 100.0f, glm::vec3(0, 1, 0));
 
+    // Make the trunk less cylindrical
+    SDFSineDisplacement barkRoughness(glm::vec3(20.0, 20.0, 4.0), 0.01);
+
+    // Combine these into a displaced SDF
+    //DisplacedSDF roughTrunk(&trunkCylinder, &barkRoughness);
+    SDFLink trunkLink;
+    trunkLink.c = &smooth;
+    trunkLink.s = &trunkCylinder;
+    trunkLink.t = trunkT;
+
+    treeChain.addLink(trunkLink);
+
+    // Add L1 branches
+    constexpr int min_branches = 10;
+    constexpr int max_branches = 10;
+    float lastBranchHeight = 0.0f;
+    std::uniform_int_distribution<int> randomNumBranches(min_branches, max_branches);
+    std::uniform_int_distribution<int> randomThickness(30, 40); // Branches are 50-75% as thick as last level
+    std::uniform_int_distribution<int> randomBranchHeight(60, 80); // Branches are 60-80% up the remaining length of the trunk
+    std::uniform_int_distribution<int> randomBranchDirection(0, 360); // Branch origin is some point along the outside of the trunk
+    std::uniform_int_distribution<int> randomBranchLength(800, 1000);
+    int numBranches = randomNumBranches(rng);
+    SDFCurvedXYCone* branchCones = new SDFCurvedXYCone[numBranches];
+    for (int branch = 0; branch < numBranches; branch++) {
+        float l1Thickness = float(randomThickness(rng)) / 100.0f;
+        float curBranchHeight = float(randomBranchHeight(rng)) / 100.0f;
+
+        glm::vec3 curBranchStart = center;
+        curBranchStart.z += trunkHeight * curBranchHeight;
+        float curBranchTheta = glm::radians(float(randomBranchDirection(rng)));
+        glm::vec3 curBranchDirection(glm::cos(curBranchTheta), glm::sin(curBranchTheta), 0);
+        glm::vec3 vectorToExterior = curBranchDirection;
+        vectorToExterior *= initialTreeRadius * 0.0;
+        curBranchStart += vectorToExterior;
+        curBranchStart = trunkT.transformPoint(curBranchStart);
+
+        float curBranchLength = (float(randomBranchLength(rng)) / 1000.0f) * max_branch_length;
+        glm::vec3 curBranchEnd = curBranchStart + curBranchLength * curBranchDirection;
+
+        SDFLink curBranch;
+        branchCones[branch] = SDFCurvedXYCone(curBranchLength, l1Thickness, l1Thickness * 0.9, 1.0, 1.0);
+        curBranch.s = (SDF*)&branchCones[branch];
+        curBranch.t = SDFTransformOp();
+        curBranch.t.addTranslation(curBranchStart);
+        curBranch.t.addRotation(curBranchTheta, glm::vec3(0, 0, 1));
+        curBranch.c = &smooth;
+        treeChain.addLink(curBranch);
+    }
 
     for (int x = 0; x < result->sizeX; x++) {
         for (int y = 0; y < result->sizeY; y++) {
@@ -340,6 +399,7 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
             }
         }
     }
+    delete[] branchCones;
 
     return result;
 }
@@ -351,10 +411,10 @@ static void blitVoxels(VoxelChunk* dst, VoxelFragment* src, int sx, int sy, int 
     for (int x = 0; (x + sx < CHUNK_WIDTH_VOXELS) && (x < src->sizeX); x++) {
         for (int y = 0; (y + sy < CHUNK_WIDTH_VOXELS) && (y < src->sizeY); y++) {
             for (int z = 0; (z + sz < CHUNK_HEIGHT_VOXELS) && (z < src->sizeZ); z++) {
-                int dstIndex = (sx + x) + (sy + y) * CHUNK_WIDTH_VOXELS + (sz + z) * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS;
+                //int dstIndex = (sx + x) + (sy + y) * CHUNK_WIDTH_VOXELS + (sz + z) * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS;
                 int srcIndex = x + y * src->sizeX + z * src->sizeX * src->sizeY;
                 if (src->voxels[srcIndex] < 0) {
-                    dst->voxels[dstIndex] = src->voxels[srcIndex];
+                    dst->voxels[sx + x][sy + y][sz + z] = src->voxels[srcIndex];
                 }
             }
         }
@@ -362,7 +422,7 @@ static void blitVoxels(VoxelChunk* dst, VoxelFragment* src, int sx, int sy, int 
 }
 
 static VoxelChunk* forestTest() {
-    double grassHeight = 3;
+    double grassHeight = 128;
     VoxelChunk* dst = grassTest(grassHeight);
     /*
     for (int x = 0; x < VOXELS_PER_METER; x++) {
@@ -378,7 +438,7 @@ static VoxelChunk* forestTest() {
         }
     }
     */
-    const glm::vec3 treeDimensions(3, 3, 10);
+    const glm::vec3 treeDimensions(5, 5, 28);
     VoxelFragment* src = proceduralTree(treeDimensions);
     blitVoxels(dst, src, CHUNK_WIDTH_VOXELS / 2 - (treeDimensions.x / 2) * VOXELS_PER_METER, CHUNK_WIDTH_VOXELS / 2 - (treeDimensions.y / 2) * VOXELS_PER_METER, int(grassHeight));
     delete[] src->voxels;

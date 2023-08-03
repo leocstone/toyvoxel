@@ -28,6 +28,12 @@ public:
         transformMat = glm::scale(transformMat, scale);
     }
 
+    glm::vec3 transformPoint(const glm::vec3& point) const {
+        glm::vec4 tv(point, 1);
+        tv = transformMat * tv;
+        return glm::vec3(tv.x, tv.y, tv.z);
+    }
+
 protected:
     glm::mat4 transformMat;
 };

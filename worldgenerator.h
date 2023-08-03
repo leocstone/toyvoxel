@@ -6,6 +6,7 @@
 #include "sdf/sdfchain.h"
 #include "sdf/primitive.h"
 #include "sdf/displacement.h"
+#include "sdf/displacedsdf.h"
 
 /*
 Structure:
@@ -18,7 +19,7 @@ typedef int32_t Voxel;
 // A chunk is 16x16 meters XY
 constexpr int CHUNK_WIDTH_METERS = 16;
 // and 256 meters tall
-constexpr int CHUNK_HEIGHT_METERS = 16;
+constexpr int CHUNK_HEIGHT_METERS = 32;
 // There are 8 voxels in 1 meter
 constexpr int VOXELS_PER_METER = 16;
 
@@ -26,13 +27,17 @@ constexpr int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
 constexpr int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
 
 struct VoxelChunk {
-    Voxel voxels[CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * CHUNK_HEIGHT_VOXELS];
+    Voxel voxels[CHUNK_WIDTH_VOXELS][CHUNK_WIDTH_VOXELS][CHUNK_HEIGHT_VOXELS];
     Voxel getVoxel(int x, int y, int z) {
-        return voxels[x + y * CHUNK_WIDTH_VOXELS + z * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS];
+        return voxels[x][y][z];
     }
     void setVoxel(int x, int y, int z, const Voxel& v) {
-        voxels[x + y * CHUNK_WIDTH_VOXELS + z * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS] = v;
+        voxels[x][y][z] = v;
     }
+};
+
+struct VoxelChunk3D {
+    Voxel voxels[CHUNK_WIDTH_VOXELS][CHUNK_WIDTH_VOXELS][CHUNK_HEIGHT_VOXELS];
 };
 
 struct VoxelFragment {

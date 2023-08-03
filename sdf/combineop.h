@@ -8,7 +8,7 @@ public:
     virtual float combinedDist(float s1, float s2) = 0;
 };
 
-class SDFUnion : SDFCombineOp
+class SDFUnion : public SDFCombineOp
 {
 public:
     float combinedDist(float s1, float s2) {
