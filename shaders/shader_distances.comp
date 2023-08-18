@@ -33,6 +33,7 @@ int getVoxel(ivec3 coord) {
 }
 
 void setVoxel(ivec3 coord, int v) {
+    /*
     if ((coord.x < 0) ||
         (coord.x >= CHUNK_WIDTH_VOXELS) ||
         (coord.y < 0) ||
@@ -41,10 +42,11 @@ void setVoxel(ivec3 coord, int v) {
         (coord.z >= CHUNK_HEIGHT_VOXELS)) {
         return;
     }
+    */
     voxels[coord.x][coord.y][coord.z] = v;
 }
 
-const int max_search_radius = 2;
+const int max_search_radius = 64;
 int findClosestVoxel(ivec3 checked) {
     /*
     if (checked.x < 0 || checked.y < 0 || checked.z < 0 ||
