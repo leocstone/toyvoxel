@@ -17,7 +17,6 @@
 #include <chrono>
 #include <array>
 #include "ansi.h"
-#include "console.h"
 
 #include "lib/stb_image.h"
 
@@ -80,7 +79,7 @@ const std::vector<uint16_t> indices = {
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
 constexpr float ASPECT = float(WIDTH) / float(HEIGHT);
-const uint32_t RENDER_SCALE = 2;
+const uint32_t RENDER_SCALE = 4;
 
 /* Font rendering */
 constexpr int FONT_WIDTH_GLYPHS = 16;
@@ -100,7 +99,7 @@ constexpr float FONT_BG2_Y = float(FONT_BG2_INDEX / FONT_WIDTH_GLYPHS) * GLYPH_W
 constexpr glm::vec2 FONT_BG2_UV(FONT_BG2_X, FONT_BG2_Y);
 
 float getGlyphWidthForAspect() {
-    return GLYPH_WIDTH_SCREEN / ASPECT;
+    return (GLYPH_WIDTH_SCREEN / ASPECT) / 2.0f;
 }
 
 const char* testText = "Hello world";
@@ -220,9 +219,9 @@ private:
                     snprintf(scratch, sizeof(scratch),  "Valid commands:\n"
                                                         "%-20sshows this message.\n"
                                                         "%-20sprint a message.\n"
-                                                        "%-20squit the game."
+                                                        "%-20squit the game.\n"
                                                         "%-20sget current position\n"
-                                                        "%-20sset position\n",
+                                                        "%-20sset position",
                                                         "help", "echo <message>", "exit/quit", "getpos", "setpos x,y,z");
                     strcpy(output, scratch);
                 } else if (strncmp(commandBuf + 1, "echo ", 5) == 0) {
@@ -339,6 +338,7 @@ private:
 
     /* Font rendering */
     FontMesh renderedFont;
+    FontMesh renderedFpsCounter;
 
     VkImage fontImage;
     VkDeviceMemory fontImageMemory;
@@ -349,6 +349,11 @@ private:
     VkDeviceMemory textBufferMemory;
     VkBuffer textIndexBuffer;
     VkDeviceMemory textIndexBufferMemory;
+
+    VkBuffer fpsCounterBuffer;
+    VkDeviceMemory fpsCounterMemory;
+    VkBuffer fpsCounterIndexBuffer;
+    VkDeviceMemory fpsCounterIndexMemory;
 
     std::vector<VkDescriptorSet> fontDescriptorSets;
 
@@ -397,6 +402,9 @@ private:
     bool framebufferResized = false;
     bool shouldQuit = false;
 
+    double lastFrameFps = 0.0;
+    bool fpsCounterEnabled = false;
+
     /** Functions **/
     static bool platformIsLittleEndian() {
         unsigned int t = 1;
@@ -405,6 +413,70 @@ private:
 
     static bool isPrintableAscii(char c) {
         return (c >= 32 && c <= 126);
+    }
+
+    // Anchored to right side of screen
+    void addMeshForLabel(FontMesh& result, char* label, float yOffset) {
+        int numChars = strlen(label);
+
+        float textWidth = float(numChars) * getGlyphWidthForAspect();
+        float textHeight = GLYPH_WIDTH_SCREEN;
+        float marginX = CONSOLE_MARGIN / ASPECT;
+        float marginY = CONSOLE_MARGIN;
+        size_t curIndex = result.vert.size();
+        result.vert.push_back({{1.0f - textWidth - marginX, -1.0f + yOffset}, FONT_BG_UV});
+        result.vert.push_back({{1.0f, -1.0f + yOffset}, FONT_BG_UV});
+        result.vert.push_back({{1.0f, -1.0f + textHeight + marginY + yOffset}, FONT_BG_UV});
+        result.vert.push_back({{1.0f - textWidth - marginX, -1.0f + textHeight + marginY + yOffset}, FONT_BG_UV});
+
+        result.ind.push_back(curIndex);
+        result.ind.push_back(curIndex + 1);
+        result.ind.push_back(curIndex + 2);
+        result.ind.push_back(curIndex + 2);
+        result.ind.push_back(curIndex + 3);
+        result.ind.push_back(curIndex);
+
+        const glm::vec2 textStart(1.0f - textWidth, -1.0f + marginY + yOffset);
+        for (int i = 0; i < numChars; i++) {
+            glm::vec2 curOrigin(textStart.x + float(i) * getGlyphWidthForAspect(), textStart.y);
+            glm::vec2 curEndpoint(textStart.x + float(i + 1) * getGlyphWidthForAspect(), textStart.y + textHeight);
+
+            curIndex = result.vert.size();
+
+            int curCharX = label[i] % FONT_WIDTH_GLYPHS;
+            int curCharY = label[i] / FONT_WIDTH_GLYPHS;
+            glm::vec2 curCharTexCoord(float(curCharX) * GLYPH_WIDTH_TEXCOORDS,
+                                      float(curCharY) * GLYPH_WIDTH_TEXCOORDS);
+
+            result.vert.push_back({curOrigin, curCharTexCoord});
+            result.vert.push_back({{curEndpoint.x, curOrigin.y}, {curCharTexCoord.x + GLYPH_WIDTH_TEXCOORDS, curCharTexCoord.y}});
+            result.vert.push_back({curEndpoint, {curCharTexCoord.x + GLYPH_WIDTH_TEXCOORDS, curCharTexCoord.y + GLYPH_WIDTH_TEXCOORDS}});
+            result.vert.push_back({{curOrigin.x, curEndpoint.y}, {curCharTexCoord.x, curCharTexCoord.y + GLYPH_WIDTH_TEXCOORDS}});
+
+            result.ind.push_back(curIndex);
+            result.ind.push_back(curIndex + 1);
+            result.ind.push_back(curIndex + 2);
+            result.ind.push_back(curIndex + 2);
+            result.ind.push_back(curIndex + 3);
+            result.ind.push_back(curIndex);
+        }
+    }
+
+    FontMesh getMeshForFpsCounter(double fps) {
+        FontMesh result;
+        char scratch[64];
+        snprintf(scratch, 64, "%.0f", fps);
+        scratch[63] = '\0';
+
+        addMeshForLabel(result, "yesheng alpha 0.01", 0.0f);
+
+        addMeshForLabel(result, scratch, GLYPH_WIDTH_SCREEN + CONSOLE_MARGIN);
+
+        /* Add position display */
+        snprintf(scratch, 64, "(%.2f, %.2f, %.2f)", camera.position.x, camera.position.y, camera.position.z);
+        addMeshForLabel(result, scratch, (GLYPH_WIDTH_SCREEN + CONSOLE_MARGIN) * 2.0f);
+
+        return result;
     }
 
     FontMesh getMeshForConsole() {
@@ -556,6 +628,8 @@ private:
                     } else if (key == GLFW_KEY_BACKSPACE) {
                         app->console.deleteCharacter();
                     }
+                } else if (key == GLFW_KEY_F1) {
+                    app->fpsCounterEnabled = !app->fpsCounterEnabled;
                 }
                 app->keyPressed[key] = true;
                 break;
@@ -648,12 +722,13 @@ private:
         loadVkImage("textures/texture.png", STBI_rgb_alpha, textureImage, textureImageMemory);
         createTextureImageView();
         createTextureSampler();
-        loadVkImage("textures/ascii_font_clean.png", STBI_rgb_alpha, fontImage, fontImageMemory);
+        loadVkImage("textures/ascii_font_tall.png", STBI_rgb_alpha, fontImage, fontImageMemory);
         createFontImageView();
         createFontSampler();
         createVertexBuffer();
         createIndexBuffer();
         createTextBuffers();
+        createFpsCounterBuffers();
         createUniformBuffers();
         createVoxelBuffers();
         createRenderImages();
@@ -1714,6 +1789,67 @@ private:
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 
+    void createFpsCounterBuffers() {
+        /* Font mesh */
+        renderedFpsCounter = getMeshForFpsCounter(lastFrameFps);
+        /* Vertex buffer */
+        VkDeviceSize bufferSize = sizeof(renderedFpsCounter.vert[0]) * renderedFpsCounter.vert.size();
+
+        VkBuffer vertexStagingBuffer;
+        VkDeviceMemory vertexStagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, vertexStagingBuffer, vertexStagingBufferMemory);
+
+        // Fill the buffer with data
+        void* data;
+        vkMapMemory(device, vertexStagingBufferMemory, 0, bufferSize, 0, &data);
+            memcpy(data, renderedFpsCounter.vert.data(), (size_t) bufferSize);
+        vkUnmapMemory(device, vertexStagingBufferMemory);
+
+        createBuffer(bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, fpsCounterBuffer, fpsCounterMemory);
+        copyBuffer(vertexStagingBuffer, fpsCounterBuffer, bufferSize);
+
+        vkDestroyBuffer(device, vertexStagingBuffer, nullptr);
+        vkFreeMemory(device, vertexStagingBufferMemory, nullptr);
+        /* Index buffer */
+        VkDeviceSize indexBufferSize = sizeof(renderedFpsCounter.ind[0]) * renderedFpsCounter.ind.size();
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        // Fill the buffer with data
+        //void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, indexBufferSize, 0, &data);
+            memcpy(data, renderedFpsCounter.ind.data(), (size_t) indexBufferSize);
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        createBuffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, fpsCounterIndexBuffer, fpsCounterIndexMemory);
+        copyBuffer(stagingBuffer, fpsCounterIndexBuffer, indexBufferSize);
+
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+    void recreateFpsBuffers() {
+        vkDeviceWaitIdle(device);
+
+        vkDestroyBuffer(device, fpsCounterBuffer, nullptr);
+        vkFreeMemory(device, fpsCounterMemory, nullptr);
+
+        vkDestroyBuffer(device, fpsCounterIndexBuffer, nullptr);
+        vkFreeMemory(device, fpsCounterIndexMemory, nullptr);
+
+        createFpsCounterBuffers();
+    }
+
     void createTextBuffers() {
         /* Font mesh */
         renderedFont = getMeshForConsole();
@@ -1961,6 +2097,18 @@ private:
                                     pipelineLayout, 0, 1, &fontDescriptorSets[currentFrame], 0,
                                     nullptr);
             vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(renderedFont.ind.size()), 1, 0, 0, 0);
+        }
+
+        if (fpsCounterEnabled) {
+            VkBuffer textVertexBuffers[] = {fpsCounterBuffer};
+            VkDeviceSize textOffsets[] = {0};
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, textVertexBuffers, textOffsets);
+
+            vkCmdBindIndexBuffer(commandBuffer, fpsCounterIndexBuffer, 0, VK_INDEX_TYPE_UINT16);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    pipelineLayout, 0, 1, &fontDescriptorSets[currentFrame], 0,
+                                    nullptr);
+            vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(renderedFpsCounter.ind.size()), 1, 0, 0, 0);
         }
 
         vkCmdEndRenderPass(commandBuffer);
@@ -2674,12 +2822,13 @@ private:
         while (!glfwWindowShouldClose(window) && !shouldQuit) {
             glfwPollEvents();
             //std::cout << "Frame " << currentFrame << std::endl;
-            const auto start = std::chrono::steady_clock::now();
+            /** Avoid putting syscalls here - they seem to break the timer **/
+            const auto start = std::chrono::high_resolution_clock::now();
             drawFrame();
-            const auto end = std::chrono::steady_clock::now();
-            const std::chrono::duration<double> elapsed_seconds = end - start;
-            //std::cout << 1 / elapsed_seconds.count() << std::endl;
-            timeSpentRendering += elapsed_seconds.count();
+            const auto end_time = std::chrono::high_resolution_clock::now();
+            const float frameTime = std::chrono::duration<float, std::chrono::seconds::period>(end_time - start).count();
+            lastFrameFps = 1 / frameTime;
+            timeSpentRendering += frameTime;
             frameCounter++;
         }
         std::cout << "Frames rendered: " << frameCounter << std::endl;
@@ -2693,6 +2842,9 @@ private:
         if (!console.latestTextRendered()) {
             recreateTextBuffers();
             console.setRenderedText();
+        }
+        if (fpsCounterEnabled) {
+            recreateFpsBuffers();
         }
 
         auto currentTime = std::chrono::high_resolution_clock::now();
@@ -2913,6 +3065,12 @@ private:
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+
+        vkDestroyBuffer(device, fpsCounterBuffer, nullptr);
+        vkFreeMemory(device, fpsCounterMemory, nullptr);
+
+        vkDestroyBuffer(device, fpsCounterIndexBuffer, nullptr);
+        vkFreeMemory(device, fpsCounterIndexMemory, nullptr);
 
         vkDestroyBuffer(device, textBuffer, nullptr);
         vkFreeMemory(device, textBufferMemory, nullptr);
