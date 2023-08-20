@@ -16,6 +16,8 @@
 #include <fstream>
 #include <chrono>
 #include <array>
+#include "ansi.h"
+#include "console.h"
 
 #include "lib/stb_image.h"
 
@@ -65,14 +67,47 @@ struct Vertex {
 };
 
 const std::vector<Vertex> vertices = {
-    {{-1.0f, -1.0f}, {1.0f, 0.0f}},
-    {{1.0f, -1.0f}, {0.0f, 0.0f}},
-    {{1.0f, 1.0f}, {0.0f, 1.0f}},
-    {{-1.0f, 1.0f}, {1.0f, 1.0f}}
+    {{-1.0f, -1.0f}, {0.0f, 0.0f}},
+    {{1.0f, -1.0f}, {1.0f, 0.0f}},
+    {{1.0f, 1.0f}, {1.0f, 1.0f}},
+    {{-1.0f, 1.0f}, {0.0f, 1.0f}}
 };
 
 const std::vector<uint16_t> indices = {
     0, 1, 2, 2, 3, 0
+};
+
+const uint32_t WIDTH = 1920;
+const uint32_t HEIGHT = 1080;
+constexpr float ASPECT = float(WIDTH) / float(HEIGHT);
+const uint32_t RENDER_SCALE = 2;
+
+/* Font rendering */
+constexpr int FONT_WIDTH_GLYPHS = 16;
+constexpr float GLYPH_WIDTH_TEXCOORDS = 1.0f / float(FONT_WIDTH_GLYPHS);
+constexpr float GLYPH_WIDTH_SCREEN = GLYPH_WIDTH_TEXCOORDS;
+constexpr float CONSOLE_MARGIN = 0.01f;
+
+/* Information for the console background colors - stored in font */
+constexpr int FONT_BG_INDEX = 129;
+constexpr float FONT_BG_X = float(FONT_BG_INDEX % FONT_WIDTH_GLYPHS) * GLYPH_WIDTH_TEXCOORDS + 0.5f * GLYPH_WIDTH_TEXCOORDS;
+constexpr float FONT_BG_Y = float(FONT_BG_INDEX / FONT_WIDTH_GLYPHS) * GLYPH_WIDTH_TEXCOORDS + 0.5f * GLYPH_WIDTH_TEXCOORDS;
+constexpr glm::vec2 FONT_BG_UV(FONT_BG_X, FONT_BG_Y);
+
+constexpr int FONT_BG2_INDEX = 141;
+constexpr float FONT_BG2_X = float(FONT_BG2_INDEX % FONT_WIDTH_GLYPHS) * GLYPH_WIDTH_TEXCOORDS + 0.5f * GLYPH_WIDTH_TEXCOORDS;
+constexpr float FONT_BG2_Y = float(FONT_BG2_INDEX / FONT_WIDTH_GLYPHS) * GLYPH_WIDTH_TEXCOORDS + 0.5f * GLYPH_WIDTH_TEXCOORDS;
+constexpr glm::vec2 FONT_BG2_UV(FONT_BG2_X, FONT_BG2_Y);
+
+float getGlyphWidthForAspect() {
+    return GLYPH_WIDTH_SCREEN / ASPECT;
+}
+
+const char* testText = "Hello world";
+
+struct FontMesh {
+    std::vector<Vertex> vert = {};
+    std::vector<uint16_t> ind = {};
 };
 
 struct UniformBufferObject {
@@ -80,10 +115,6 @@ struct UniformBufferObject {
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
 };
-
-const uint32_t WIDTH = 1920;
-const uint32_t HEIGHT = 1080;
-const uint32_t RENDER_SCALE = 2;
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 uint32_t currentFrame = 0;
@@ -141,6 +172,8 @@ void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT
 class Game {
 public:
     void run() {
+        littleEndian = platformIsLittleEndian();
+        console.setGameInstance(this);
         initWindow();
         initVulkan();
         mainLoop();
@@ -148,6 +181,108 @@ public:
     }
 
 private:
+    /** Console class **/
+    static constexpr int MAX_LINE = 256;
+    static constexpr int MAX_OUTPUT_LINES = 16;
+
+    class Console
+    {
+    public:
+        Console() {
+            clearInput();
+            clearOutput();
+        }
+        ~Console() {}
+
+        void setGameInstance(Game* g) {
+            instance = g;
+        }
+
+        void enterCharacter(char c) {
+            if (commandCursor < (MAX_LINE - 2)) {
+                commandBuf[commandCursor] = c;
+                commandCursor++;
+                _latestTextRendered = false;
+            }
+        }
+
+        void deleteCharacter() {
+            if (commandCursor > 1) {
+                commandCursor--;
+                commandBuf[commandCursor] = '\0';
+                _latestTextRendered = false;
+            }
+        }
+
+        void runCommand() {
+            if (hasInput()) {
+                if (strcmp(commandBuf + 1, "help") == 0) {
+                    snprintf(scratch, sizeof(scratch),  "Valid commands:\n"
+                                                        "%-20sshows this message.\n"
+                                                        "%-20sprint a message.\n"
+                                                        "%-20squit the game."
+                                                        "%-20sget current position\n"
+                                                        "%-20sset position\n",
+                                                        "help", "echo <message>", "exit/quit", "getpos", "setpos x,y,z");
+                    strcpy(output, scratch);
+                } else if (strncmp(commandBuf + 1, "echo ", 5) == 0) {
+                    strcpy(output, commandBuf + 6);
+                } else if (strcmp(commandBuf + 1, "exit") == 0 || strcmp(commandBuf + 1, "quit") == 0) {
+                    instance->shouldQuit = true;
+                } else if (strcmp(commandBuf + 1, "getpos") == 0) {
+                    snprintf(scratch, sizeof(scratch), "(%f, %f, %f)", instance->camera.position.x, instance->camera.position.y, instance->camera.position.z);
+                    strcpy(output, scratch);
+                } else if (strncmp(commandBuf + 1, "setpos ", 6) == 0) {
+                    float readPositions[3] = {0.0f, 0.0f, 0.0f};
+                    int matched = sscanf(commandBuf + 8, "%f,%f,%f", &readPositions[0], &readPositions[1], &readPositions[2]);
+                    if (matched == 3) {
+                        instance->camera.position = glm::vec3(readPositions[0], readPositions[1], readPositions[2]);
+                    } else {
+                        strcpy(output, "Invalid position.");
+                    }
+                } else {
+                    strcpy(output, "Invalid command.");
+                }
+
+                clearInput();
+                _latestTextRendered = false;
+            }
+        }
+
+        void toggle() { enabled = !enabled; }
+        bool isEnabled() { return enabled; }
+        bool hasOutput() { return output[0] != '\0'; }
+        bool hasInput() { return commandBuf[1] != '\0'; }
+
+        const char* getCommandBuf() { return commandBuf; }
+        const char* getOutputBuf() { return output; }
+
+        bool latestTextRendered() { return _latestTextRendered; }
+        void setRenderedText() { _latestTextRendered = true; }
+
+    private:
+        void clearOutput() {
+            output[0] = '\0';
+        }
+
+        void clearInput() {
+            memset(commandBuf, '\0', MAX_LINE);
+            commandBuf[0] = '>';
+            commandCursor = 1;
+        }
+
+        bool enabled = false;
+        bool _latestTextRendered = false;
+        char commandBuf[MAX_LINE];
+        int commandCursor = 0;
+        char output[MAX_OUTPUT_LINES * MAX_LINE];
+        char scratch[MAX_OUTPUT_LINES * MAX_LINE];
+        Game* instance;
+    };
+
+    /** Variables **/
+    bool littleEndian;
+
     GLFWwindow* window;
 
     VkInstance instance;
@@ -202,6 +337,24 @@ private:
     VkImageView textureImageView;
     VkSampler textureSampler;
 
+    /* Font rendering */
+    FontMesh renderedFont;
+
+    VkImage fontImage;
+    VkDeviceMemory fontImageMemory;
+    VkImageView fontImageView;
+    VkSampler fontSampler;
+
+    VkBuffer textBuffer;
+    VkDeviceMemory textBufferMemory;
+    VkBuffer textIndexBuffer;
+    VkDeviceMemory textIndexBufferMemory;
+
+    std::vector<VkDescriptorSet> fontDescriptorSets;
+
+    /* Console */
+    Console console;
+
     /* Compute pipeline */
     VkDescriptorSetLayout computeDescriptorSetLayout;
     VkDescriptorPool computeDescriptorPool;
@@ -244,13 +397,165 @@ private:
     bool framebufferResized = false;
     bool shouldQuit = false;
 
+    /** Functions **/
+    static bool platformIsLittleEndian() {
+        unsigned int t = 1;
+        return (reinterpret_cast<char*>(&t))[0] == 1;
+    }
+
+    static bool isPrintableAscii(char c) {
+        return (c >= 32 && c <= 126);
+    }
+
+    FontMesh getMeshForConsole() {
+        FontMesh result;
+        int numChars = strlen(console.getCommandBuf());
+
+        /* Add transparent background first */
+        float textWidth = float(numChars) * getGlyphWidthForAspect();
+        float textHeight = GLYPH_WIDTH_SCREEN;
+        float marginX = CONSOLE_MARGIN / ASPECT;
+        float marginY = CONSOLE_MARGIN;
+
+        result.vert.push_back({{-1.0f, -1.0f}, FONT_BG_UV});
+        result.vert.push_back({{1.0f, -1.0f}, FONT_BG_UV});
+        result.vert.push_back({{1.0f, -1.0f + textHeight}, FONT_BG_UV});
+        result.vert.push_back({{-1.0f, -1.0f + textHeight}, FONT_BG_UV});
+
+        result.ind.push_back(0);
+        result.ind.push_back(1);
+        result.ind.push_back(2);
+        result.ind.push_back(2);
+        result.ind.push_back(3);
+        result.ind.push_back(0);
+
+        /* Console output */
+        const char* output = console.getOutputBuf();
+        if (console.hasOutput()) {
+            /* Background */
+            int numLines = 1;
+            for (int i = 0; output[i] != '\0'; i++) {
+                if (output[i] == '\n') {
+                    numLines++;
+                }
+            }
+            float outputHeight = textHeight * float(numLines);
+            size_t curIndex = result.vert.size();
+
+            result.vert.push_back({{-1.0f, -1.0f + textHeight}, FONT_BG2_UV});
+            result.vert.push_back({{1.0f, -1.0f + textHeight}, FONT_BG2_UV});
+            result.vert.push_back({{1.0f, -1.0f + textHeight + outputHeight}, FONT_BG2_UV});
+            result.vert.push_back({{-1.0f, -1.0f + textHeight + outputHeight}, FONT_BG2_UV});
+
+            result.ind.push_back(curIndex);
+            result.ind.push_back(curIndex + 1);
+            result.ind.push_back(curIndex + 2);
+            result.ind.push_back(curIndex + 2);
+            result.ind.push_back(curIndex + 3);
+            result.ind.push_back(curIndex);
+
+            /* Text */
+            glm::vec2 curOffset(-1.0f, -1.0f + textHeight);
+            for (int i = 0; output[i] != '\0'; i++) {
+                if (isPrintableAscii(output[i])) {
+                    /* Indices */
+                    curIndex = result.vert.size();
+                    result.ind.push_back(curIndex);
+                    result.ind.push_back(curIndex + 1);
+                    result.ind.push_back(curIndex + 2);
+                    result.ind.push_back(curIndex + 2);
+                    result.ind.push_back(curIndex + 3);
+                    result.ind.push_back(curIndex);
+                    /* Vertices */
+                    int curCharX = output[i] % FONT_WIDTH_GLYPHS;
+                    int curCharY = output[i] / FONT_WIDTH_GLYPHS;
+                    glm::vec2 curCharTexCoord(float(curCharX) * GLYPH_WIDTH_TEXCOORDS,
+                                              float(curCharY) * GLYPH_WIDTH_TEXCOORDS);
+                    // Top left
+                    result.vert.push_back({{curOffset.x, curOffset.y},
+                                     curCharTexCoord});
+                    // Top right
+                    result.vert.push_back({{curOffset.x + getGlyphWidthForAspect(), curOffset.y},
+                                     {curCharTexCoord.x + GLYPH_WIDTH_TEXCOORDS, curCharTexCoord.y}});
+                    // Bottom right
+                    result.vert.push_back({{curOffset.x + getGlyphWidthForAspect(), curOffset.y + textHeight},
+                                     {curCharTexCoord.x + GLYPH_WIDTH_TEXCOORDS, curCharTexCoord.y + GLYPH_WIDTH_TEXCOORDS}});
+                    // Bottom left
+                    result.vert.push_back({{curOffset.x, curOffset.y + textHeight},
+                                     {curCharTexCoord.x, curCharTexCoord.y + GLYPH_WIDTH_TEXCOORDS}});
+
+                    curOffset.x += getGlyphWidthForAspect();
+                } else if (output[i] == '\n') {
+                    curOffset.x = -1.0f;
+                    curOffset.y += textHeight;
+                }
+            }
+        }
+
+        /* Characters */
+        for (int i = 0; i < numChars; i++) {
+            /* Indices */
+            size_t curIndex = result.vert.size();
+            result.ind.push_back(curIndex);
+            result.ind.push_back(curIndex + 1);
+            result.ind.push_back(curIndex + 2);
+            result.ind.push_back(curIndex + 2);
+            result.ind.push_back(curIndex + 3);
+            result.ind.push_back(curIndex);
+            /* Vertices */
+            int curCharX = console.getCommandBuf()[i] % FONT_WIDTH_GLYPHS;
+            int curCharY = console.getCommandBuf()[i] / FONT_WIDTH_GLYPHS;
+            glm::vec2 curCharTexCoord(float(curCharX) * GLYPH_WIDTH_TEXCOORDS,
+                                      float(curCharY) * GLYPH_WIDTH_TEXCOORDS);
+            // Top left
+            result.vert.push_back({{-1.0f + float(i) * getGlyphWidthForAspect(), -1.0f},
+                             curCharTexCoord});
+            // Top right
+            result.vert.push_back({{-1.0f + float(i + 1) * getGlyphWidthForAspect(), -1.0f},
+                             {curCharTexCoord.x + GLYPH_WIDTH_TEXCOORDS, curCharTexCoord.y}});
+            // Bottom right
+            result.vert.push_back({{-1.0f + float(i + 1) * getGlyphWidthForAspect(), -1.0f + GLYPH_WIDTH_SCREEN},
+                             {curCharTexCoord.x + GLYPH_WIDTH_TEXCOORDS, curCharTexCoord.y + GLYPH_WIDTH_TEXCOORDS}});
+            // Bottom left
+            result.vert.push_back({{-1.0f + float(i) * getGlyphWidthForAspect(), -1.0f + GLYPH_WIDTH_SCREEN},
+                             {curCharTexCoord.x, curCharTexCoord.y + GLYPH_WIDTH_TEXCOORDS}});
+        }
+        return result;
+    }
+
+    /*
+    UTF-32 text input
+    */
+    static void charCallback(GLFWwindow* window, unsigned int codepoint) {
+        Game* app = reinterpret_cast<Game*>(glfwGetWindowUserPointer(window));
+        if (app->console.isEnabled()) {
+            char c;
+            if (app->littleEndian) {
+                c = (reinterpret_cast<char *>(&codepoint))[0];
+            } else {
+                c = (reinterpret_cast<char *>(&codepoint))[3];
+            }
+            if (isPrintableAscii(c) && c != '`') {
+                app->console.enterCharacter(c);
+            }
+        }
+    }
+
     static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
         Game* app = reinterpret_cast<Game*>(glfwGetWindowUserPointer(window));
         if (key <= GLFW_KEY_LAST && key >= 0) {
             switch(action) {
             case GLFW_PRESS:
-                if (key == GLFW_KEY_Q) {
+                if (key == GLFW_KEY_GRAVE_ACCENT) {
+                    app->console.toggle();
+                } else if (!app->console.isEnabled() && (key == GLFW_KEY_Q)) {
                     app->shouldQuit = true;
+                } else if (app->console.isEnabled()) {
+                    if (key == GLFW_KEY_ENTER) {
+                        app->console.runCommand();
+                    } else if (key == GLFW_KEY_BACKSPACE) {
+                        app->console.deleteCharacter();
+                    }
                 }
                 app->keyPressed[key] = true;
                 break;
@@ -279,7 +584,25 @@ private:
         const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
         void *pUserData) {
 
-        std::cerr << "Validation layer: " << pCallbackData->pMessage << std::endl;
+        std::stringstream ss;
+
+        switch (messageSeverity) {
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+            ss << "[Verbose] " << ANSI::escape(pCallbackData->pMessage, FAINT, FG_DEFAULT);
+            break;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+            ss << "[Info] " << ANSI::escape(pCallbackData->pMessage, FAINT, FG_DEFAULT);
+            break;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+            ss << "[Warning] " << ANSI::escape(pCallbackData->pMessage, FG_DEFAULT, FG_YELLOW);
+            break;
+        case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+            ss << ANSI::escape("[ERROR] ", BOLD, FG_RED) << ANSI::escape(pCallbackData->pMessage, BOLD, FG_RED);
+            break;
+        default:
+            break;
+        }
+        std::cout << ss.str() << std::endl;
 
         return VK_FALSE;
     }
@@ -293,6 +616,7 @@ private:
         for (int i = 0; i < GLFW_KEY_LAST; i++) {
             keyPressed[i] = false;
         }
+        glfwSetCharCallback(window, charCallback);
         glfwSetKeyCallback(window, keyCallback);
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         if (glfwRawMouseMotionSupported())
@@ -321,17 +645,22 @@ private:
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
-        createTextureImage();
+        loadVkImage("textures/texture.png", STBI_rgb_alpha, textureImage, textureImageMemory);
         createTextureImageView();
         createTextureSampler();
+        loadVkImage("textures/ascii_font_clean.png", STBI_rgb_alpha, fontImage, fontImageMemory);
+        createFontImageView();
+        createFontSampler();
         createVertexBuffer();
         createIndexBuffer();
+        createTextBuffers();
         createUniformBuffers();
         createVoxelBuffers();
         createRenderImages();
         createRenderImageViews();
         createDescriptorPool();
         createDescriptorSets();
+        createFontDescriptorSets();
         createCommandBuffers();
         createSyncObjects();
         createComputeDescriptorSetLayout();
@@ -761,6 +1090,38 @@ private:
         }
     }
 
+    void createFontSampler() {
+        VkSamplerCreateInfo samplerInfo {};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        samplerInfo.magFilter = VK_FILTER_NEAREST;
+        samplerInfo.minFilter = VK_FILTER_NEAREST;
+
+        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+
+        VkPhysicalDeviceProperties properties {};
+        vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+
+        samplerInfo.anisotropyEnable = VK_FALSE;
+        samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+
+        samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        samplerInfo.unnormalizedCoordinates = VK_FALSE;
+
+        samplerInfo.compareEnable = VK_FALSE;
+        samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+
+        samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        samplerInfo.mipLodBias = 0.0f;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = 0.0f;
+
+        if (vkCreateSampler(device, &samplerInfo, nullptr, &fontSampler) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create texture sampler!");
+        }
+    }
+
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
         VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
@@ -976,6 +1337,47 @@ private:
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 
+    /*
+    Load a given file to a VkImage and VkDeviceMemory
+    calls stbi_load with given desired_channels
+    */
+    void loadVkImage(const char* path, int desired_channels, VkImage& image, VkDeviceMemory& memory) {
+        int texWidth, texHeight, texChannels;
+        stbi_uc* pixels = stbi_load(path, &texWidth, &texHeight,
+                                    &texChannels, desired_channels);
+        VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+        if (!pixels) {
+            throw std::runtime_error("failed to load texture image!");
+        }
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(imageSize, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
+            memcpy(data, pixels, static_cast<size_t>(imageSize));
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        stbi_image_free(pixels);
+
+        createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image, memory);
+
+        transitionImageLayout(image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        copyBufferToImage(stagingBuffer, image, static_cast<uint32_t>(texWidth),
+                          static_cast<uint32_t>(texHeight));
+        transitionImageLayout(image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
     VkImageView createImageView(VkImage image, VkFormat format) {
         VkImageViewCreateInfo createInfo {};
         createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1005,6 +1407,10 @@ private:
 
     void createTextureImageView() {
         textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB);
+    }
+
+    void createFontImageView() {
+        fontImageView = createImageView(fontImage, VK_FORMAT_R8G8B8A8_SRGB);
     }
 
     void createRenderImages() {
@@ -1067,7 +1473,9 @@ private:
         allocInfo.pSetLayouts = layouts.data();
 
         descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-        if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+        VkResult result;
+        if ((result = vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data())) != VK_SUCCESS) {
+            std::cout << string_VkResult(result) << std::endl;
             throw std::runtime_error("failed to allocate descriptor sets!");
         }
 
@@ -1105,18 +1513,67 @@ private:
         }
     }
 
+    void createFontDescriptorSets() {
+        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
+        VkDescriptorSetAllocateInfo allocInfo {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = descriptorPool;
+        allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        allocInfo.pSetLayouts = layouts.data();
+
+        fontDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+        VkResult result;
+        if ((result = vkAllocateDescriptorSets(device, &allocInfo, fontDescriptorSets.data())) != VK_SUCCESS) {
+            std::cout << string_VkResult(result) << std::endl;
+            throw std::runtime_error("failed to allocate descriptor sets!");
+        }
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            VkDescriptorBufferInfo bufferInfo {};
+            bufferInfo.buffer = uniformBuffers[i];
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeof(UniformBufferObject);
+
+            VkDescriptorImageInfo imageInfo {};
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo.imageView = fontImageView;
+            imageInfo.sampler = fontSampler;
+
+            std::array<VkWriteDescriptorSet, 2> descriptorWrites {};
+
+            descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[0].dstSet = fontDescriptorSets[i];
+            descriptorWrites[0].dstBinding = 0;
+            descriptorWrites[0].dstArrayElement = 0;
+            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrites[0].descriptorCount = 1;
+            descriptorWrites[0].pBufferInfo = &bufferInfo;
+
+            descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[1].dstSet = fontDescriptorSets[i];
+            descriptorWrites[1].dstBinding = 1;
+            descriptorWrites[1].dstArrayElement = 0;
+            descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[1].descriptorCount = 1;
+            descriptorWrites[1].pImageInfo = &imageInfo;
+
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
+                                    descriptorWrites.data(), 0, nullptr);
+        }
+    }
+
     void createDescriptorPool() {
         std::array<VkDescriptorPoolSize, 2> poolSizes {};
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 2;
         poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 2;
 
         VkDescriptorPoolCreateInfo poolInfo {};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
         poolInfo.pPoolSizes = poolSizes.data();
-        poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 2;
         poolInfo.flags = 0;
 
         if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
@@ -1255,6 +1712,67 @@ private:
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+    void createTextBuffers() {
+        /* Font mesh */
+        renderedFont = getMeshForConsole();
+        /* Vertex buffer */
+        VkDeviceSize bufferSize = sizeof(renderedFont.vert[0]) * renderedFont.vert.size();
+
+        VkBuffer vertexStagingBuffer;
+        VkDeviceMemory vertexStagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, vertexStagingBuffer, vertexStagingBufferMemory);
+
+        // Fill the buffer with data
+        void* data;
+        vkMapMemory(device, vertexStagingBufferMemory, 0, bufferSize, 0, &data);
+            memcpy(data, renderedFont.vert.data(), (size_t) bufferSize);
+        vkUnmapMemory(device, vertexStagingBufferMemory);
+
+        createBuffer(bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textBuffer, textBufferMemory);
+        copyBuffer(vertexStagingBuffer, textBuffer, bufferSize);
+
+        vkDestroyBuffer(device, vertexStagingBuffer, nullptr);
+        vkFreeMemory(device, vertexStagingBufferMemory, nullptr);
+        /* Index buffer */
+        VkDeviceSize indexBufferSize = sizeof(renderedFont.ind[0]) * renderedFont.ind.size();
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        // Fill the buffer with data
+        //void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, indexBufferSize, 0, &data);
+            memcpy(data, renderedFont.ind.data(), (size_t) indexBufferSize);
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        createBuffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textIndexBuffer, textIndexBufferMemory);
+        copyBuffer(stagingBuffer, textIndexBuffer, indexBufferSize);
+
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+    void recreateTextBuffers() {
+        vkDeviceWaitIdle(device);
+
+        vkDestroyBuffer(device, textBuffer, nullptr);
+        vkFreeMemory(device, textBufferMemory, nullptr);
+
+        vkDestroyBuffer(device, textIndexBuffer, nullptr);
+        vkFreeMemory(device, textIndexBufferMemory, nullptr);
+
+        createTextBuffers();
     }
 
     void createIndexBuffer() {
@@ -1431,6 +1949,20 @@ private:
                                 pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0,
                                 nullptr);
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+
+        /* Font rendering */
+        if (console.isEnabled()) {
+            VkBuffer textVertexBuffers[] = {textBuffer};
+            VkDeviceSize textOffsets[] = {0};
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, textVertexBuffers, textOffsets);
+
+            vkCmdBindIndexBuffer(commandBuffer, textIndexBuffer, 0, VK_INDEX_TYPE_UINT16);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    pipelineLayout, 0, 1, &fontDescriptorSets[currentFrame], 0,
+                                    nullptr);
+            vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(renderedFont.ind.size()), 1, 0, 0, 0);
+        }
+
         vkCmdEndRenderPass(commandBuffer);
 
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
@@ -1689,13 +2221,14 @@ private:
                                               VK_COLOR_COMPONENT_G_BIT |
                                               VK_COLOR_COMPONENT_B_BIT |
                                               VK_COLOR_COMPONENT_A_BIT;
-        colorBlendAttachment.blendEnable = VK_FALSE;
-        colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
-        colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD; // Optional
-        colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE; // Optional
-        colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO; // Optional
-        colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD; // Optional
+        colorBlendAttachment.blendEnable = VK_TRUE;
+        colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+        // Should these be switched (alpha of framebuffer will be alpha of last written component?)
+        colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
         // Per-pipeline
         VkPipelineColorBlendStateCreateInfo colorBlending{};
@@ -2157,6 +2690,11 @@ private:
     }
 
     void drawFrame() {
+        if (!console.latestTextRendered()) {
+            recreateTextBuffers();
+            console.setRenderedText();
+        }
+
         auto currentTime = std::chrono::high_resolution_clock::now();
         float deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - lastFrameStart).count();
         camera.cur_time += deltaTime;
@@ -2191,36 +2729,38 @@ private:
         cursorDeltaY *= sensitivity;
 
         /* Camera rotation */
-        cameraRotY -= cursorDeltaY;
-        cameraRotZ -= cursorDeltaX;
+        if (!console.isEnabled()) {
+            cameraRotY -= cursorDeltaY;
+            cameraRotZ += cursorDeltaX;
 
-        cameraRotY = glm::clamp(cameraRotY, minPitch, maxPitch);
+            cameraRotY = glm::clamp(cameraRotY, minPitch, maxPitch);
 
-        camera.forward = glm::normalize(glm::vec3(glm::cos(cameraRotZ) * glm::cos(cameraRotY), glm::sin(cameraRotZ) * glm::cos(cameraRotY), glm::sin(cameraRotY)));
-        camera.up = glm::normalize(glm::vec3(glm::cos(cameraRotZ) * glm::cos(cameraRotY + glm::radians(90.0f)), glm::sin(cameraRotZ) * glm::cos(cameraRotY + glm::radians(90.0f)), glm::sin(cameraRotY + glm::radians(90.0f))));
-        camera.right = -glm::cross(camera.forward, camera.up);
+            camera.forward = glm::normalize(glm::vec3(glm::cos(cameraRotZ) * glm::cos(cameraRotY), glm::sin(cameraRotZ) * glm::cos(cameraRotY), glm::sin(cameraRotY)));
+            camera.up = glm::normalize(glm::vec3(glm::cos(cameraRotZ) * glm::cos(cameraRotY + glm::radians(90.0f)), glm::sin(cameraRotZ) * glm::cos(cameraRotY + glm::radians(90.0f)), glm::sin(cameraRotY + glm::radians(90.0f))));
+            camera.right = -glm::cross(camera.forward, camera.up);
 
-        //printf("Fwd: (%f, %f, %f)\n", camera.forward.x, camera.forward.y, camera.forward.z);
-        //printf("Up: (%f, %f, %f)\n", camera.up.x, camera.up.y, camera.up.z);
-        //printf("Right: (%f, %f, %f)\n", camera.right.x, camera.right.y, camera.right.z);
+            //printf("Fwd: (%f, %f, %f)\n", camera.forward.x, camera.forward.y, camera.forward.z);
+            //printf("Up: (%f, %f, %f)\n", camera.up.x, camera.up.y, camera.up.z);
+            //printf("Right: (%f, %f, %f)\n", camera.right.x, camera.right.y, camera.right.z);
 
-        /* Camera position */
-        glm::vec3 moveDirection(0, 0, 0);
-        float moveSpeed = 1.0;
-        if (keyPressed[GLFW_KEY_W])
-            moveDirection += camera.forward;
-        if (keyPressed[GLFW_KEY_S])
-            moveDirection -= camera.forward;
-        if (keyPressed[GLFW_KEY_A])
-            moveDirection += camera.right;
-        if (keyPressed[GLFW_KEY_D])
-            moveDirection -= camera.right;
-        if (keyPressed[GLFW_KEY_LEFT_SHIFT])
-            moveSpeed = 10.0f;
-        camera.position += moveDirection * deltaTime * moveSpeed;
-        //std::cout << "Camera: " << camera.position.x << ", " << camera.position.y << ", " << camera.position.z << std::endl;
-        //std::cout << "Rot Z: " << cameraRotZ << " Rot Y: " << cameraRotY << std::endl;
-        //std::cout << "x: " << cursorDeltaX << " y: " << cursorDeltaY << std::endl;
+            /* Camera position */
+            glm::vec3 moveDirection(0, 0, 0);
+            float moveSpeed = 1.0;
+            if (keyPressed[GLFW_KEY_W])
+                moveDirection += camera.forward;
+            if (keyPressed[GLFW_KEY_S])
+                moveDirection -= camera.forward;
+            if (keyPressed[GLFW_KEY_A])
+                moveDirection -= camera.right;
+            if (keyPressed[GLFW_KEY_D])
+                moveDirection += camera.right;
+            if (keyPressed[GLFW_KEY_LEFT_SHIFT])
+                moveSpeed = 10.0f;
+            camera.position += moveDirection * deltaTime * moveSpeed;
+            //std::cout << "Camera: " << camera.position.x << ", " << camera.position.y << ", " << camera.position.z << std::endl;
+            //std::cout << "Rot Z: " << cameraRotZ << " Rot Y: " << cameraRotY << std::endl;
+            //std::cout << "x: " << cursorDeltaX << " y: " << cursorDeltaY << std::endl;
+        }
         camera.sunDirection = glm::normalize(glm::vec3(0.1 * glm::sin(camera.cur_time) + 1, 0.1 * glm::cos(camera.cur_time) + 1, 0.1 * glm::sin(camera.cur_time) - 1));
 
         /* Compute shader block */
@@ -2350,6 +2890,12 @@ private:
         vkDestroyDescriptorPool(device, computeDescriptorPool, nullptr);
         vkDestroyDescriptorSetLayout(device, computeDescriptorSetLayout, nullptr);
 
+        vkDestroySampler(device, fontSampler, nullptr);
+        vkDestroyImageView(device, fontImageView, nullptr);
+
+        vkDestroyImage(device, fontImage, nullptr);
+        vkFreeMemory(device, fontImageMemory, nullptr);
+
         vkDestroySampler(device, textureSampler, nullptr);
         vkDestroyImageView(device, textureImageView, nullptr);
 
@@ -2367,6 +2913,12 @@ private:
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+
+        vkDestroyBuffer(device, textBuffer, nullptr);
+        vkFreeMemory(device, textBufferMemory, nullptr);
+
+        vkDestroyBuffer(device, textIndexBuffer, nullptr);
+        vkFreeMemory(device, textIndexBufferMemory, nullptr);
 
         vkDestroyBuffer(device, vertexBuffer, nullptr);
         vkFreeMemory(device, vertexBufferMemory, nullptr);
@@ -2401,6 +2953,7 @@ private:
 };
 
 int main() {
+    std::cout << ANSI::escape("------------------------------------yesheng-------------------------------------", BOLD, FG_DEFAULT) << std::endl;
     Game app;
 
     try {
