@@ -6,9 +6,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
-#include <cstring>
 #include <cstdio>
-#include <vector>
 #include <optional>
 #include <set>
 #include <limits>
@@ -18,11 +16,15 @@
 #include <array>
 #include "ansi.h"
 
-#include "lib/stb_image.h"
-
 #include <vulkan/vk_enum_string_helper.h>
 
 #include "worldgenerator.h"
+#include "fontrenderer.h"
+
+static bool platformIsLittleEndian() {
+    unsigned int t = 1;
+    return (reinterpret_cast<char*>(&t))[0] == 1;
+}
 
 struct Camera {
     alignas(16) glm::vec3 position = glm::vec3(-32.3128, 29.9501, 16.8475);
@@ -33,38 +35,33 @@ struct Camera {
     alignas(16) glm::vec3 sunDirection = glm::vec3(-1, -1, -1);
 };
 
-struct Vertex {
-    glm::vec2 pos;
-    glm::vec2 texCoord;
+static VkVertexInputBindingDescription getVertexBindingDescription() {
+    VkVertexInputBindingDescription bindingDescription {};
+    bindingDescription.binding = 0;
+    bindingDescription.stride = sizeof(Vertex);
+    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    static VkVertexInputBindingDescription getBindingDescription() {
-        VkVertexInputBindingDescription bindingDescription {};
-        bindingDescription.binding = 0;
-        bindingDescription.stride = sizeof(Vertex);
-        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    return bindingDescription;
+}
 
-        return bindingDescription;
-    }
+static std::array<VkVertexInputAttributeDescription, 2> getVertexAttributeDescriptions() {
+    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions {};
 
-    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions()
-    {
-        std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions {};
+    attributeDescriptions[0].binding = 0;
+    attributeDescriptions[0].location = 0;
+    attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[0].offset = offsetof(Vertex, pos);
 
-        attributeDescriptions[0].binding = 0;
-        attributeDescriptions[0].location = 0;
-        attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
-        attributeDescriptions[0].offset = offsetof(Vertex, pos);
-
-        attributeDescriptions[1].binding = 0;
-        attributeDescriptions[1].location = 1;
-        attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
-        attributeDescriptions[1].offset = offsetof(Vertex, texCoord);
+    attributeDescriptions[1].binding = 0;
+    attributeDescriptions[1].location = 1;
+    attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[1].offset = offsetof(Vertex, texCoord);
 
 
-        return attributeDescriptions;
-    }
-};
+    return attributeDescriptions;
+}
 
+/* Vertex arrays for framebuffer quad */
 const std::vector<Vertex> vertices = {
     {{-1.0f, -1.0f}, {0.0f, 0.0f}},
     {{1.0f, -1.0f}, {1.0f, 0.0f}},
@@ -79,35 +76,7 @@ const std::vector<uint16_t> indices = {
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
 constexpr float ASPECT = float(WIDTH) / float(HEIGHT);
-const uint32_t RENDER_SCALE = 4;
-
-/* Font rendering */
-constexpr int FONT_WIDTH_GLYPHS = 16;
-constexpr float GLYPH_WIDTH_TEXCOORDS = 1.0f / float(FONT_WIDTH_GLYPHS);
-constexpr float GLYPH_WIDTH_SCREEN = GLYPH_WIDTH_TEXCOORDS;
-constexpr float CONSOLE_MARGIN = 0.01f;
-
-/* Information for the console background colors - stored in font */
-constexpr int FONT_BG_INDEX = 129;
-constexpr float FONT_BG_X = float(FONT_BG_INDEX % FONT_WIDTH_GLYPHS) * GLYPH_WIDTH_TEXCOORDS + 0.5f * GLYPH_WIDTH_TEXCOORDS;
-constexpr float FONT_BG_Y = float(FONT_BG_INDEX / FONT_WIDTH_GLYPHS) * GLYPH_WIDTH_TEXCOORDS + 0.5f * GLYPH_WIDTH_TEXCOORDS;
-constexpr glm::vec2 FONT_BG_UV(FONT_BG_X, FONT_BG_Y);
-
-constexpr int FONT_BG2_INDEX = 141;
-constexpr float FONT_BG2_X = float(FONT_BG2_INDEX % FONT_WIDTH_GLYPHS) * GLYPH_WIDTH_TEXCOORDS + 0.5f * GLYPH_WIDTH_TEXCOORDS;
-constexpr float FONT_BG2_Y = float(FONT_BG2_INDEX / FONT_WIDTH_GLYPHS) * GLYPH_WIDTH_TEXCOORDS + 0.5f * GLYPH_WIDTH_TEXCOORDS;
-constexpr glm::vec2 FONT_BG2_UV(FONT_BG2_X, FONT_BG2_Y);
-
-float getGlyphWidthForAspect() {
-    return (GLYPH_WIDTH_SCREEN / ASPECT) / 2.0f;
-}
-
-const char* testText = "Hello world";
-
-struct FontMesh {
-    std::vector<Vertex> vert = {};
-    std::vector<uint16_t> ind = {};
-};
+const uint32_t RENDER_SCALE = 8;
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
@@ -217,11 +186,11 @@ private:
             if (hasInput()) {
                 if (strcmp(commandBuf + 1, "help") == 0) {
                     snprintf(scratch, sizeof(scratch),  "Valid commands:\n"
-                                                        "%-20sshows this message.\n"
-                                                        "%-20sprint a message.\n"
-                                                        "%-20squit the game.\n"
-                                                        "%-20sget current position\n"
-                                                        "%-20sset position",
+                                                        "%s: shows this message.\n"
+                                                        "%s: print a message.\n"
+                                                        "%s: quit the game.\n"
+                                                        "%s: get current position\n"
+                                                        "%s: set position",
                                                         "help", "echo <message>", "exit/quit", "getpos", "setpos x,y,z");
                     strcpy(output, scratch);
                 } else if (strncmp(commandBuf + 1, "echo ", 5) == 0) {
@@ -337,6 +306,8 @@ private:
     VkSampler textureSampler;
 
     /* Font rendering */
+    FontRenderer fontRenderer;
+
     FontMesh renderedFont;
     FontMesh renderedFpsCounter;
 
@@ -405,76 +376,32 @@ private:
     double lastFrameFps = 0.0;
     bool fpsCounterEnabled = false;
 
-    /** Functions **/
-    static bool platformIsLittleEndian() {
-        unsigned int t = 1;
-        return (reinterpret_cast<char*>(&t))[0] == 1;
-    }
-
-    static bool isPrintableAscii(char c) {
-        return (c >= 32 && c <= 126);
-    }
-
-    // Anchored to right side of screen
-    void addMeshForLabel(FontMesh& result, char* label, float yOffset) {
-        int numChars = strlen(label);
-
-        float textWidth = float(numChars) * getGlyphWidthForAspect();
-        float textHeight = GLYPH_WIDTH_SCREEN;
-        float marginX = CONSOLE_MARGIN / ASPECT;
-        float marginY = CONSOLE_MARGIN;
-        size_t curIndex = result.vert.size();
-        result.vert.push_back({{1.0f - textWidth - marginX, -1.0f + yOffset}, FONT_BG_UV});
-        result.vert.push_back({{1.0f, -1.0f + yOffset}, FONT_BG_UV});
-        result.vert.push_back({{1.0f, -1.0f + textHeight + marginY + yOffset}, FONT_BG_UV});
-        result.vert.push_back({{1.0f - textWidth - marginX, -1.0f + textHeight + marginY + yOffset}, FONT_BG_UV});
-
-        result.ind.push_back(curIndex);
-        result.ind.push_back(curIndex + 1);
-        result.ind.push_back(curIndex + 2);
-        result.ind.push_back(curIndex + 2);
-        result.ind.push_back(curIndex + 3);
-        result.ind.push_back(curIndex);
-
-        const glm::vec2 textStart(1.0f - textWidth, -1.0f + marginY + yOffset);
-        for (int i = 0; i < numChars; i++) {
-            glm::vec2 curOrigin(textStart.x + float(i) * getGlyphWidthForAspect(), textStart.y);
-            glm::vec2 curEndpoint(textStart.x + float(i + 1) * getGlyphWidthForAspect(), textStart.y + textHeight);
-
-            curIndex = result.vert.size();
-
-            int curCharX = label[i] % FONT_WIDTH_GLYPHS;
-            int curCharY = label[i] / FONT_WIDTH_GLYPHS;
-            glm::vec2 curCharTexCoord(float(curCharX) * GLYPH_WIDTH_TEXCOORDS,
-                                      float(curCharY) * GLYPH_WIDTH_TEXCOORDS);
-
-            result.vert.push_back({curOrigin, curCharTexCoord});
-            result.vert.push_back({{curEndpoint.x, curOrigin.y}, {curCharTexCoord.x + GLYPH_WIDTH_TEXCOORDS, curCharTexCoord.y}});
-            result.vert.push_back({curEndpoint, {curCharTexCoord.x + GLYPH_WIDTH_TEXCOORDS, curCharTexCoord.y + GLYPH_WIDTH_TEXCOORDS}});
-            result.vert.push_back({{curOrigin.x, curEndpoint.y}, {curCharTexCoord.x, curCharTexCoord.y + GLYPH_WIDTH_TEXCOORDS}});
-
-            result.ind.push_back(curIndex);
-            result.ind.push_back(curIndex + 1);
-            result.ind.push_back(curIndex + 2);
-            result.ind.push_back(curIndex + 2);
-            result.ind.push_back(curIndex + 3);
-            result.ind.push_back(curIndex);
-        }
-    }
-
     FontMesh getMeshForFpsCounter(double fps) {
         FontMesh result;
         char scratch[64];
         snprintf(scratch, 64, "%.0f", fps);
         scratch[63] = '\0';
 
-        addMeshForLabel(result, "yesheng alpha 0.01", 0.0f);
+        glm::vec2 cursor(-1.0, -1.0);
+        /* Title text */
+        const char* titleText = "yesheng alpha 0.01";
+        double labelWidth = fontRenderer.getGlyphWidthScreen() * strlen(titleText) + CONSOLE_MARGIN * 2.0;
+        double labelHeight = fontRenderer.getGlyphHeightScreen() + CONSOLE_MARGIN * 2.0;
+        fontRenderer.addMeshForBG(result, FONT_BG2_UV, cursor, {-1.0 + labelWidth, cursor.y + labelHeight});
+        fontRenderer.addMeshForLabel(result, titleText, {cursor.x + CONSOLE_MARGIN, cursor.y + CONSOLE_MARGIN});
+        cursor.y += labelHeight;
 
-        addMeshForLabel(result, scratch, GLYPH_WIDTH_SCREEN + CONSOLE_MARGIN);
+        /* FPS counter */
+        labelWidth = fontRenderer.getGlyphWidthScreen() * strlen(scratch) + CONSOLE_MARGIN * 2.0;
+        fontRenderer.addMeshForBG(result, FONT_BG2_UV, cursor, {-1.0 + labelWidth, cursor.y + labelHeight});
+        fontRenderer.addMeshForLabel(result, scratch, {cursor.x + CONSOLE_MARGIN, cursor.y + CONSOLE_MARGIN});
+        cursor.y += labelHeight;
 
-        /* Add position display */
+        /* Position display */
         snprintf(scratch, 64, "(%.2f, %.2f, %.2f)", camera.position.x, camera.position.y, camera.position.z);
-        addMeshForLabel(result, scratch, (GLYPH_WIDTH_SCREEN + CONSOLE_MARGIN) * 2.0f);
+        labelWidth = fontRenderer.getGlyphWidthScreen() * strlen(scratch) + CONSOLE_MARGIN * 2.0;
+        fontRenderer.addMeshForBG(result, FONT_BG2_UV, cursor, {-1.0 + labelWidth, cursor.y + labelHeight});
+        fontRenderer.addMeshForLabel(result, scratch, {cursor.x + CONSOLE_MARGIN, cursor.y + CONSOLE_MARGIN});
 
         return result;
     }
@@ -483,115 +410,28 @@ private:
         FontMesh result;
         int numChars = strlen(console.getCommandBuf());
 
-        /* Add transparent background first */
-        float textWidth = float(numChars) * getGlyphWidthForAspect();
-        float textHeight = GLYPH_WIDTH_SCREEN;
-        float marginX = CONSOLE_MARGIN / ASPECT;
-        float marginY = CONSOLE_MARGIN;
+        /* Command buffer */
+        glm::vec2 cursor(-1.0 + CONSOLE_MARGIN, -1.0 + (fontRenderer.getGlyphHeightScreen() + 2.0 * CONSOLE_MARGIN) * 3.0);
+        fontRenderer.addMeshForBG(result, FONT_BG2_UV, {-1.0, cursor.y + fontRenderer.getGlyphHeightScreen()},
+                                                       {1.0, cursor.y});
+        fontRenderer.addMeshForLabel(result, console.getCommandBuf(), cursor);
+        cursor.y += fontRenderer.getGlyphHeightScreen();
 
-        result.vert.push_back({{-1.0f, -1.0f}, FONT_BG_UV});
-        result.vert.push_back({{1.0f, -1.0f}, FONT_BG_UV});
-        result.vert.push_back({{1.0f, -1.0f + textHeight}, FONT_BG_UV});
-        result.vert.push_back({{-1.0f, -1.0f + textHeight}, FONT_BG_UV});
-
-        result.ind.push_back(0);
-        result.ind.push_back(1);
-        result.ind.push_back(2);
-        result.ind.push_back(2);
-        result.ind.push_back(3);
-        result.ind.push_back(0);
-
-        /* Console output */
-        const char* output = console.getOutputBuf();
+        /* Output buffer */
         if (console.hasOutput()) {
-            /* Background */
             int numLines = 1;
-            for (int i = 0; output[i] != '\0'; i++) {
-                if (output[i] == '\n') {
+            int outputLength = strlen(console.getOutputBuf());
+            for (int i = 0; i < outputLength; i++) {
+                if (console.getOutputBuf()[i] == '\n') {
                     numLines++;
                 }
             }
-            float outputHeight = textHeight * float(numLines);
-            size_t curIndex = result.vert.size();
-
-            result.vert.push_back({{-1.0f, -1.0f + textHeight}, FONT_BG2_UV});
-            result.vert.push_back({{1.0f, -1.0f + textHeight}, FONT_BG2_UV});
-            result.vert.push_back({{1.0f, -1.0f + textHeight + outputHeight}, FONT_BG2_UV});
-            result.vert.push_back({{-1.0f, -1.0f + textHeight + outputHeight}, FONT_BG2_UV});
-
-            result.ind.push_back(curIndex);
-            result.ind.push_back(curIndex + 1);
-            result.ind.push_back(curIndex + 2);
-            result.ind.push_back(curIndex + 2);
-            result.ind.push_back(curIndex + 3);
-            result.ind.push_back(curIndex);
-
-            /* Text */
-            glm::vec2 curOffset(-1.0f, -1.0f + textHeight);
-            for (int i = 0; output[i] != '\0'; i++) {
-                if (isPrintableAscii(output[i])) {
-                    /* Indices */
-                    curIndex = result.vert.size();
-                    result.ind.push_back(curIndex);
-                    result.ind.push_back(curIndex + 1);
-                    result.ind.push_back(curIndex + 2);
-                    result.ind.push_back(curIndex + 2);
-                    result.ind.push_back(curIndex + 3);
-                    result.ind.push_back(curIndex);
-                    /* Vertices */
-                    int curCharX = output[i] % FONT_WIDTH_GLYPHS;
-                    int curCharY = output[i] / FONT_WIDTH_GLYPHS;
-                    glm::vec2 curCharTexCoord(float(curCharX) * GLYPH_WIDTH_TEXCOORDS,
-                                              float(curCharY) * GLYPH_WIDTH_TEXCOORDS);
-                    // Top left
-                    result.vert.push_back({{curOffset.x, curOffset.y},
-                                     curCharTexCoord});
-                    // Top right
-                    result.vert.push_back({{curOffset.x + getGlyphWidthForAspect(), curOffset.y},
-                                     {curCharTexCoord.x + GLYPH_WIDTH_TEXCOORDS, curCharTexCoord.y}});
-                    // Bottom right
-                    result.vert.push_back({{curOffset.x + getGlyphWidthForAspect(), curOffset.y + textHeight},
-                                     {curCharTexCoord.x + GLYPH_WIDTH_TEXCOORDS, curCharTexCoord.y + GLYPH_WIDTH_TEXCOORDS}});
-                    // Bottom left
-                    result.vert.push_back({{curOffset.x, curOffset.y + textHeight},
-                                     {curCharTexCoord.x, curCharTexCoord.y + GLYPH_WIDTH_TEXCOORDS}});
-
-                    curOffset.x += getGlyphWidthForAspect();
-                } else if (output[i] == '\n') {
-                    curOffset.x = -1.0f;
-                    curOffset.y += textHeight;
-                }
-            }
+            double outputHeight = fontRenderer.getGlyphHeightScreen() * double(numLines);
+            fontRenderer.addMeshForBG(result, FONT_BG2_UV, {-1.0, cursor.y},
+                                                          {1.0, cursor.y + outputHeight});
+            fontRenderer.addMeshForLabel(result, console.getOutputBuf(), cursor);
         }
 
-        /* Characters */
-        for (int i = 0; i < numChars; i++) {
-            /* Indices */
-            size_t curIndex = result.vert.size();
-            result.ind.push_back(curIndex);
-            result.ind.push_back(curIndex + 1);
-            result.ind.push_back(curIndex + 2);
-            result.ind.push_back(curIndex + 2);
-            result.ind.push_back(curIndex + 3);
-            result.ind.push_back(curIndex);
-            /* Vertices */
-            int curCharX = console.getCommandBuf()[i] % FONT_WIDTH_GLYPHS;
-            int curCharY = console.getCommandBuf()[i] / FONT_WIDTH_GLYPHS;
-            glm::vec2 curCharTexCoord(float(curCharX) * GLYPH_WIDTH_TEXCOORDS,
-                                      float(curCharY) * GLYPH_WIDTH_TEXCOORDS);
-            // Top left
-            result.vert.push_back({{-1.0f + float(i) * getGlyphWidthForAspect(), -1.0f},
-                             curCharTexCoord});
-            // Top right
-            result.vert.push_back({{-1.0f + float(i + 1) * getGlyphWidthForAspect(), -1.0f},
-                             {curCharTexCoord.x + GLYPH_WIDTH_TEXCOORDS, curCharTexCoord.y}});
-            // Bottom right
-            result.vert.push_back({{-1.0f + float(i + 1) * getGlyphWidthForAspect(), -1.0f + GLYPH_WIDTH_SCREEN},
-                             {curCharTexCoord.x + GLYPH_WIDTH_TEXCOORDS, curCharTexCoord.y + GLYPH_WIDTH_TEXCOORDS}});
-            // Bottom left
-            result.vert.push_back({{-1.0f + float(i) * getGlyphWidthForAspect(), -1.0f + GLYPH_WIDTH_SCREEN},
-                             {curCharTexCoord.x, curCharTexCoord.y + GLYPH_WIDTH_TEXCOORDS}});
-        }
         return result;
     }
 
@@ -722,7 +562,7 @@ private:
         loadVkImage("textures/texture.png", STBI_rgb_alpha, textureImage, textureImageMemory);
         createTextureImageView();
         createTextureSampler();
-        loadVkImage("textures/ascii_font_tall.png", STBI_rgb_alpha, fontImage, fontImageMemory);
+        loadFont();
         createFontImageView();
         createFontSampler();
         createVertexBuffer();
@@ -1451,6 +1291,53 @@ private:
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+    void loadVkImage(stbi_uc* pixels, int texWidth, int texHeight, VkImage& image, VkDeviceMemory& memory) {
+        VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+        if (!pixels) {
+            throw std::runtime_error("NULL texture image!");
+        }
+
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(imageSize, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
+            memcpy(data, pixels, static_cast<size_t>(imageSize));
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image, memory);
+
+        transitionImageLayout(image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        copyBufferToImage(stagingBuffer, image, static_cast<uint32_t>(texWidth),
+                          static_cast<uint32_t>(texHeight));
+        transitionImageLayout(image, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+    void loadFont() {
+        int texWidth, texHeight, texChannels;
+        int desired_channels = STBI_rgb_alpha;
+        stbi_uc* pixels = stbi_load("textures/ascii_font_tall_big_handwritten.png", &texWidth, &texHeight,
+                                    &texChannels, desired_channels);
+        VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+        if (!pixels) {
+            throw std::runtime_error("failed to load texture image!");
+        }
+
+        loadVkImage(pixels, texWidth, texHeight, fontImage, fontImageMemory);
+        stbi_image_free(pixels);
     }
 
     VkImageView createImageView(VkImage image, VkFormat format) {
@@ -2285,8 +2172,8 @@ private:
         // Format of vertex data passed to vertex shader
         VkPipelineVertexInputStateCreateInfo vertexInputInfo {};
         vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        auto bindingDescription = Vertex::getBindingDescription();
-        auto attributeDescriptions = Vertex::getAttributeDescriptions();
+        auto bindingDescription = getVertexBindingDescription();
+        auto attributeDescriptions = getVertexAttributeDescriptions();
         vertexInputInfo.vertexBindingDescriptionCount = 1;
         vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
         vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
@@ -2504,6 +2391,7 @@ private:
 
         swapChainImageFormat = surfaceFormat.format;
         swapChainExtent = extent;
+        fontRenderer.updateResolution(swapChainExtent.width, swapChainExtent.height);
     }
 
     void createSurface() {

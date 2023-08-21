@@ -27,7 +27,7 @@ layout(std430, binding = 1, row_major) readonly buffer VoxelChunkIn {
 
 const int SAMPLES = 1;
 const int MAX_STEPS = 10000;
-const int MAX_BOUNCES = 1;
+const int MAX_BOUNCES = 4;
 const float MAX_DIST = 10000.0;
 
 vec3 skyboxColorInDirection(vec3 direction) {
@@ -196,7 +196,7 @@ float directLightingAtPoint(vec3 point, vec3 normal, vec3 sunDir) {
 Computes the intensity of lighting reflecting off of other surfaces at a given point with given normal
 */
 float indirectLightingAtPoint(vec3 point, vec3 normal, vec3 sunDir) {
-    return 1.0;
+    //return 1.0;
     for (int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
         // Offset the normal by a small amount
         const float diffuse = 1.0;
