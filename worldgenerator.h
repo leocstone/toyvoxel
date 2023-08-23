@@ -14,7 +14,7 @@ if < 0, voxel id is value * -1
 if > 0, value is distance to nearest voxel
 if 0, there is no voxel here and no distance information
 */
-typedef int32_t Voxel;
+typedef int8_t Voxel;
 
 // A chunk is 16x16 meters XY
 constexpr int CHUNK_WIDTH_METERS = 16;
@@ -34,10 +34,6 @@ struct VoxelChunk {
     void setVoxel(int x, int y, int z, const Voxel& v) {
         voxels[x][y][z] = v;
     }
-};
-
-struct VoxelChunk3D {
-    Voxel voxels[CHUNK_WIDTH_VOXELS][CHUNK_WIDTH_VOXELS][CHUNK_HEIGHT_VOXELS];
 };
 
 struct VoxelFragment {

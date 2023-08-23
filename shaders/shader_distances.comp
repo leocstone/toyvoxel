@@ -1,4 +1,6 @@
 #version 450
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
 
 const int CHUNK_WIDTH_METERS = 16;
 const int CHUNK_HEIGHT_METERS = 32;
@@ -12,28 +14,37 @@ struct VoxelChunk {
 };
 */
 
+/*
+layout(push_constant) uniform PushConstants {
+    ivec3 voxelOffset;
+} pushConstants;
+*/
+
 layout(std430, binding = 0, row_major) buffer VoxelChunkIn {
-    int voxels[CHUNK_WIDTH_VOXELS][CHUNK_WIDTH_VOXELS][CHUNK_HEIGHT_VOXELS];
+    int8_t voxels[CHUNK_WIDTH_VOXELS][CHUNK_WIDTH_VOXELS][CHUNK_HEIGHT_VOXELS];
 };
 
 int flatIndex(ivec3 coord) {
     return coord.x + coord.y * CHUNK_WIDTH_VOXELS + coord.z * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS;
 }
 
-int getVoxel(ivec3 coord) {
+int8_t getVoxel(ivec3 coord) {
+
     if ((coord.x < 0) ||
         (coord.x >= CHUNK_WIDTH_VOXELS) ||
         (coord.y < 0) ||
         (coord.y >= CHUNK_WIDTH_VOXELS) ||
         (coord.z < 0) ||
         (coord.z >= CHUNK_HEIGHT_VOXELS)) {
-        return 0;
+        return int8_t(0);
     }
+
+    //return int8_t(0);
     return voxels[coord.x][coord.y][coord.z];
 }
 
 void setVoxel(ivec3 coord, int v) {
-    /*
+
     if ((coord.x < 0) ||
         (coord.x >= CHUNK_WIDTH_VOXELS) ||
         (coord.y < 0) ||
@@ -42,8 +53,8 @@ void setVoxel(ivec3 coord, int v) {
         (coord.z >= CHUNK_HEIGHT_VOXELS)) {
         return;
     }
-    */
-    voxels[coord.x][coord.y][coord.z] = v;
+
+    voxels[coord.x][coord.y][coord.z] = int8_t(v);
 }
 
 const int max_search_radius = 64;
@@ -118,38 +129,36 @@ int findClosestVoxel(ivec3 checked) {
             }
         }
     }
-    return max_search_radius; // Shouldn't happen unless entire map is empty or max search dist reached
+    return 0;//max_search_radius; // Shouldn't happen unless entire map is empty or max search dist reached
 }
 
-/*
 int findClosestVoxelSafe(ivec3 checked) {
     for (int radius = 1; radius < max_search_radius; radius++) {
-        for (int x = -radius; x <= radius; x++) {
-            for (int y = -radius; y <= radius; y++) {
-                for (int z = -radius; z <= radius; z++) {
-                    if (x == radius || x == -radius || y == radius || y == -radius || z == radius || z == -radius) {
-                        ivec3 curPos = ivec3(checked.x + x, checked.y + y, checked.z + z);
-                        if (curPos.x >= 0 && curPos.x < CHUNK_WIDTH_VOXELS &&
-                            curPos.y >= 0 && curPos.y < CHUNK_WIDTH_VOXELS &&
-                            curPos.z >= 0 && curPos.z < CHUNK_HEIGHT_VOXELS) {
-                            int voxelAtPosition = getVoxel(curPos);
-                            if (voxelAtPosition < 0)
-                                return radius - 1;
-                        }
+        for (int x = checked.x - radius; x < checked.x + radius + 1; x++) {
+            if (x < 0 || x >= CHUNK_WIDTH_VOXELS)
+                continue;
+            for (int y = checked.y - radius; y < checked.y + radius + 1; y++) {
+                if (y < 0 || y >= CHUNK_WIDTH_VOXELS)
+                    continue;
+                for (int z = checked.z - radius; z < checked.z + radius + 1; z++) {
+                    if (z < 0 || z >= CHUNK_WIDTH_VOXELS)
+                        continue;
+                    //boundsCheck(x, y, z);
+                    if (getVoxel(ivec3(x, y, z)) < 0) {
+                        return radius - 1;
                     }
                 }
             }
         }
     }
-    return max_search_radius - 1;
+    return 0;
 }
-*/
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 4) in;
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 16) in;
 
 void main() {
-    return;
-    if (getVoxel(ivec3(gl_GlobalInvocationID)) == 0) {
-        setVoxel(ivec3(gl_GlobalInvocationID), findClosestVoxel(ivec3(gl_GlobalInvocationID)));
+    ivec3 curIndex = ivec3(gl_GlobalInvocationID);// + pushConstants.voxelOffset;
+    if (getVoxel(curIndex) == 0) {
+        setVoxel(curIndex, int8_t(findClosestVoxelSafe(curIndex)));
     }
 }

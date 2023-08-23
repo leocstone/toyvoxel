@@ -27,7 +27,7 @@ static bool platformIsLittleEndian() {
 }
 
 struct Camera {
-    alignas(16) glm::vec3 position = glm::vec3(-32.3128, 29.9501, 16.8475);
+    alignas(16) glm::vec3 position = glm::vec3(0, 0, 0);//glm::vec3(-32.3128, 29.9501, 16.8475);
     alignas(16) glm::vec3 forward = glm::vec3(0, 1, 0);
     alignas(16) glm::vec3 up = glm::vec3(0, 0, 1);
     alignas(16) glm::vec3 right = glm::vec3(1, 0, 0);
@@ -57,7 +57,6 @@ static std::array<VkVertexInputAttributeDescription, 2> getVertexAttributeDescri
     attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
     attributeDescriptions[1].offset = offsetof(Vertex, texCoord);
 
-
     return attributeDescriptions;
 }
 
@@ -75,13 +74,19 @@ const std::vector<uint16_t> indices = {
 
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
-constexpr float ASPECT = float(WIDTH) / float(HEIGHT);
-const uint32_t RENDER_SCALE = 8;
+const uint32_t RENDER_SCALE = 4;
+
+/* Number of chunks around the player to load */
+const int DRAW_DISTANCE = 1;
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
     alignas(16) glm::mat4 view;
     alignas(16) glm::mat4 proj;
+};
+
+struct DistancesPushConstants {
+    alignas(16) glm::ivec3 curVoxelOffset;
 };
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
@@ -93,9 +98,11 @@ const std::vector<const char*> validationLayers = {
 };
 
 const std::vector<const char*> deviceExtensions = {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    VK_KHR_8BIT_STORAGE_EXTENSION_NAME,
+    VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME
 };
-
+#define NDEBUG
 #ifdef NDEBUG
     const bool enableValidationLayers = false;
 #else
@@ -379,7 +386,7 @@ private:
     FontMesh getMeshForFpsCounter(double fps) {
         FontMesh result;
         char scratch[64];
-        snprintf(scratch, 64, "%.0f", fps);
+        snprintf(scratch, 64, "%.0f @ %dx%d", fps, swapChainExtent.width / RENDER_SCALE, swapChainExtent.height / RENDER_SCALE);
         scratch[63] = '\0';
 
         glm::vec2 cursor(-1.0, -1.0);
@@ -408,7 +415,6 @@ private:
 
     FontMesh getMeshForConsole() {
         FontMesh result;
-        int numChars = strlen(console.getCommandBuf());
 
         /* Command buffer */
         glm::vec2 cursor(-1.0 + CONSOLE_MARGIN, -1.0 + (fontRenderer.getGlyphHeightScreen() + 2.0 * CONSOLE_MARGIN) * 3.0);
@@ -571,6 +577,7 @@ private:
         createFpsCounterBuffers();
         createUniformBuffers();
         createVoxelBuffers();
+        //throw std::runtime_error("test");
         createRenderImages();
         createRenderImageViews();
         createDescriptorPool();
@@ -588,7 +595,7 @@ private:
         createComputeDistancesPool();
         createComputeDistancesDescriptorSets();
         // Compute actual distances...
-        computeVoxelDistances();
+        //computeVoxelDistances();
     }
 
     void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
@@ -616,62 +623,166 @@ private:
     }
 
     void computeVoxelDistances() {
-        std::vector<VkFence> computeDistanceFences(MAX_FRAMES_IN_FLIGHT);
+        VkFence computeDistanceFence;
 
         VkFenceCreateInfo computeFenceInfo {};
         computeFenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         computeFenceInfo.flags = 0;
 
-        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            if (vkCreateFence(device, &computeFenceInfo, nullptr, &computeDistanceFences[i]) != VK_SUCCESS) {
-                throw std::runtime_error("Failed to create compute distance fences!");
-            }
+        if (vkCreateFence(device, &computeFenceInfo, nullptr, &computeDistanceFence) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create compute distance fences!");
         }
 
-        std::cout << "Computing voxel distances...";
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            VkCommandBufferBeginInfo beginInfo {};
-            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        const int workgroupSizeX = 8;
+        const int workgroupSizeY = 8;
+        const int workgroupSizeZ = 16;
 
-            if (vkBeginCommandBuffer(computeDistancesCommandBuffers[i], &beginInfo) != VK_SUCCESS) {
-                throw std::runtime_error("Failed to begin recording compute command buffer!");
-            }
+        VkCommandBufferBeginInfo beginInfo {};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-            vkCmdBindPipeline(computeDistancesCommandBuffers[i], VK_PIPELINE_BIND_POINT_COMPUTE, computeDistancesPipeline);
-            vkCmdBindDescriptorSets(computeDistancesCommandBuffers[i], VK_PIPELINE_BIND_POINT_COMPUTE, computeDistancesPipelineLayout,
-                                    0, 1, &computeDistancesDescriptorSets[i], 0, nullptr);
-            vkCmdDispatch(computeDistancesCommandBuffers[i], CHUNK_WIDTH_VOXELS / 8, CHUNK_WIDTH_VOXELS / 8, CHUNK_HEIGHT_VOXELS / 4);
-
-            if (vkEndCommandBuffer(computeDistancesCommandBuffers[i]) != VK_SUCCESS) {
-                throw std::runtime_error("Failed to record compute distances command buffer!");
-            }
-
-            VkSubmitInfo computeDistancesSubmitInfo {};
-            computeDistancesSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-
-            computeDistancesSubmitInfo.waitSemaphoreCount = 0;
-            computeDistancesSubmitInfo.pWaitSemaphores = nullptr;
-            computeDistancesSubmitInfo.pWaitDstStageMask = nullptr;
-
-            computeDistancesSubmitInfo.commandBufferCount = 1;
-            computeDistancesSubmitInfo.pCommandBuffers = &computeDistancesCommandBuffers[i];
-
-            computeDistancesSubmitInfo.signalSemaphoreCount = 0;
-            computeDistancesSubmitInfo.pSignalSemaphores = nullptr;
-
-            VkResult result;
-            if ((result = vkQueueSubmit(computeQueue, 1, &computeDistancesSubmitInfo, computeDistanceFences[i])) != VK_SUCCESS) {
-                std::cerr << string_VkResult(result) << std::endl;
-                throw std::runtime_error("Failed to submit compute distances command buffer");
-            }
+        if (vkBeginCommandBuffer(computeDistancesCommandBuffers[0], &beginInfo) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to begin recording compute command buffer!");
         }
 
-        vkWaitForFences(device, MAX_FRAMES_IN_FLIGHT, computeDistanceFences.data(), VK_TRUE, UINT64_MAX);
-        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            vkDestroyFence(device, computeDistanceFences[i], nullptr);
+        vkCmdBindPipeline(computeDistancesCommandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, computeDistancesPipeline);
+        vkCmdBindDescriptorSets(computeDistancesCommandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, computeDistancesPipelineLayout,
+                                0, 1, &computeDistancesDescriptorSets[0], 0, nullptr);
+
+        vkCmdDispatch(computeDistancesCommandBuffers[0], CHUNK_WIDTH_VOXELS / workgroupSizeX, CHUNK_WIDTH_VOXELS / workgroupSizeY, CHUNK_HEIGHT_VOXELS / workgroupSizeZ);
+
+        if (vkEndCommandBuffer(computeDistancesCommandBuffers[0]) != VK_SUCCESS)
+        {
+            throw std::runtime_error("Failed to record compute distances command buffer!");
         }
-        std::cout << "done." << std::endl;
+
+        VkSubmitInfo computeDistancesSubmitInfo {};
+        computeDistancesSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+        computeDistancesSubmitInfo.waitSemaphoreCount = 0;
+        computeDistancesSubmitInfo.pWaitSemaphores = nullptr;
+        computeDistancesSubmitInfo.pWaitDstStageMask = nullptr;
+
+        computeDistancesSubmitInfo.commandBufferCount = 1;
+        computeDistancesSubmitInfo.pCommandBuffers = &computeDistancesCommandBuffers[0];
+
+        computeDistancesSubmitInfo.signalSemaphoreCount = 0;
+        computeDistancesSubmitInfo.pSignalSemaphores = nullptr;
+
+        VkResult result;
+        if ((result = vkQueueSubmit(computeQueue, 1, &computeDistancesSubmitInfo, computeDistanceFence)) != VK_SUCCESS)
+        {
+            std::cerr << string_VkResult(result) << std::endl;
+            throw std::runtime_error("Failed to submit compute distances command buffer");
+        }
+        if ((result = vkWaitForFences(device, 1, &computeDistanceFence, VK_TRUE, UINT64_MAX)) != VK_SUCCESS)
+        {
+            std::cerr << "Error waiting for fence: " << string_VkResult(result) << std::endl;
+            throw std::runtime_error("Failed to wait for compute distances fence!");
+        }
+
+        vkDestroyFence(device, computeDistanceFence, nullptr);
+
+        for (int i = 1; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            copyBuffer(voxelBuffers[0], voxelBuffers[i], sizeof(VoxelChunk));
+        }
     }
+
+    /*
+    void computeVoxelDistancesIterated() {
+        VkFence computeDistanceFence;
+
+        VkFenceCreateInfo computeFenceInfo {};
+        computeFenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        computeFenceInfo.flags = 0;
+
+        if (vkCreateFence(device, &computeFenceInfo, nullptr, &computeDistanceFence) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create compute distance fences!");
+        }
+
+        const int dispatchSizeX = 1;
+        const int dispatchSizeY = 1;
+        const int dispatchSizeZ = 1;
+        const int workgroupSizeX = 8;
+        const int workgroupSizeY = 8;
+        const int workgroupSizeZ = 16;
+        const int numIterationsX = (CHUNK_WIDTH_VOXELS / workgroupSizeX) / dispatchSizeX;
+        const int numIterationsY = (CHUNK_WIDTH_VOXELS / workgroupSizeY) / dispatchSizeY;
+        const int numIterationsZ = (CHUNK_HEIGHT_VOXELS / workgroupSizeZ) / dispatchSizeZ;
+        std::cout << numIterationsX << "x" << numIterationsY << "x"<< numIterationsZ << " = " << numIterationsX * numIterationsY * numIterationsZ << " total iterations" << std::endl;
+        std::cout.flush();
+        DistancesPushConstants pushConstants;
+        pushConstants.curVoxelOffset = glm::ivec3(0, 0, 0);
+
+        for (int x = 0; x < numIterationsX; x++)
+        {
+            pushConstants.curVoxelOffset.y = 0;
+            for (int y = 0; y < numIterationsY; y++)
+            {
+                pushConstants.curVoxelOffset.z = 0;
+                for (int z = 0; z < numIterationsZ; z++)
+                {
+                    VkCommandBufferBeginInfo beginInfo {};
+                    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+                    if (vkBeginCommandBuffer(computeDistancesCommandBuffers[0], &beginInfo) != VK_SUCCESS)
+                    {
+                        throw std::runtime_error("Failed to begin recording compute command buffer!");
+                    }
+
+                    vkCmdBindPipeline(computeDistancesCommandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, computeDistancesPipeline);
+                    vkCmdBindDescriptorSets(computeDistancesCommandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, computeDistancesPipelineLayout,
+                                            0, 1, &computeDistancesDescriptorSets[0], 0, nullptr);
+
+                    vkCmdPushConstants(computeDistancesCommandBuffers[0], computeDistancesPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DistancesPushConstants), &pushConstants);
+                    vkCmdDispatch(computeDistancesCommandBuffers[0], dispatchSizeX, dispatchSizeY, dispatchSizeZ);
+
+                    if (vkEndCommandBuffer(computeDistancesCommandBuffers[0]) != VK_SUCCESS)
+                    {
+                        throw std::runtime_error("Failed to record compute distances command buffer!");
+                    }
+
+                    VkSubmitInfo computeDistancesSubmitInfo {};
+                    computeDistancesSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+                    computeDistancesSubmitInfo.waitSemaphoreCount = 0;
+                    computeDistancesSubmitInfo.pWaitSemaphores = nullptr;
+                    computeDistancesSubmitInfo.pWaitDstStageMask = nullptr;
+
+                    computeDistancesSubmitInfo.commandBufferCount = 1;
+                    computeDistancesSubmitInfo.pCommandBuffers = &computeDistancesCommandBuffers[0];
+
+                    computeDistancesSubmitInfo.signalSemaphoreCount = 0;
+                    computeDistancesSubmitInfo.pSignalSemaphores = nullptr;
+
+                    VkResult result;
+                    if ((result = vkQueueSubmit(computeQueue, 1, &computeDistancesSubmitInfo, computeDistanceFence)) != VK_SUCCESS)
+                    {
+                        std::cerr << string_VkResult(result) << std::endl;
+                        throw std::runtime_error("Failed to submit compute distances command buffer");
+                    }
+                    if ((result = vkWaitForFences(device, 1, &computeDistanceFence, VK_TRUE, UINT64_MAX)) != VK_SUCCESS)
+                    {
+                        std::cerr << "Error waiting for fence: " << string_VkResult(result) << std::endl;
+                        throw std::runtime_error("Failed to wait for compute distances fence!");
+                    }
+                    vkResetCommandBuffer(computeDistancesCommandBuffers[0], 0);
+                    vkResetFences(device, 1, &computeDistanceFence);
+                    std::cout << "Computed distances for " << pushConstants.curVoxelOffset.x << ", " << pushConstants.curVoxelOffset.y << ", " << pushConstants.curVoxelOffset.z << std::endl;
+                    pushConstants.curVoxelOffset.z += workgroupSizeZ * dispatchSizeZ;
+                }
+                pushConstants.curVoxelOffset.y += workgroupSizeY * dispatchSizeY;
+            }
+            pushConstants.curVoxelOffset.x += workgroupSizeX * dispatchSizeX;
+        }
+
+        vkDestroyFence(device, computeDistanceFence, nullptr);
+
+        for (int i = 1; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            copyBuffer(voxelBuffers[0], voxelBuffers[i], sizeof(VoxelChunk));
+        }
+    }
+    */
 
     void createComputeDistancesLayout() {
         std::array<VkDescriptorSetLayoutBinding, 1> layoutBindings {};
@@ -696,6 +807,17 @@ private:
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1;
         pipelineLayoutInfo.pSetLayouts = &computeDistancesSetLayout;
+
+        // Push constant
+        /*
+        VkPushConstantRange pushConstantRange {};
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(DistancesPushConstants);
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        pipelineLayoutInfo.pushConstantRangeCount = 1;
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+        */
 
         if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &computeDistancesPipelineLayout) != VK_SUCCESS) {
             throw std::runtime_error("Failed to create compute distances pipeline layout!");
@@ -1330,7 +1452,6 @@ private:
         int desired_channels = STBI_rgb_alpha;
         stbi_uc* pixels = stbi_load("textures/ascii_font_tall_big_handwritten.png", &texWidth, &texHeight,
                                     &texChannels, desired_channels);
-        VkDeviceSize imageSize = texWidth * texHeight * 4;
 
         if (!pixels) {
             throw std::runtime_error("failed to load texture image!");
@@ -2435,6 +2556,15 @@ private:
             createInfo.enabledLayerCount = 0;
         }
 
+        /* Enable shader 8 bit access */
+
+        VkPhysicalDeviceVulkan12Features enable8BitStorage {};
+        enable8BitStorage.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        enable8BitStorage.uniformAndStorageBuffer8BitAccess = VK_TRUE;
+        enable8BitStorage.shaderInt8 = VK_TRUE;
+
+        createInfo.pNext = &enable8BitStorage;
+
         if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS) {
             throw std::runtime_error("failed to create logical device");
         }
@@ -2465,6 +2595,11 @@ private:
         if (physicalDevice == VK_NULL_HANDLE) {
             throw std::runtime_error("failed to find a suitable GPU!");
         }
+
+        VkPhysicalDeviceProperties usedDeviceProperties;
+        vkGetPhysicalDeviceProperties(physicalDevice, &usedDeviceProperties);
+        std::cout << "Using GPU: " << usedDeviceProperties.deviceName << std::endl;
+        std::cout << "Vulkan version: " << usedDeviceProperties.apiVersion << std::endl;
     }
 
     struct QueueFamilyIndices {
@@ -2699,7 +2834,9 @@ private:
             createInfo.pNext = nullptr;
         }
 
-        if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS) {
+        VkResult result;
+        if ((result = vkCreateInstance(&createInfo, nullptr, &instance)) != VK_SUCCESS) {
+            std::cout << string_VkResult(result) << std::endl;
             throw std::runtime_error("failed to create instance!");
         }
     }

@@ -1,4 +1,6 @@
 #version 450
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
 
 const int CHUNK_WIDTH_METERS = 16;
 const int CHUNK_HEIGHT_METERS = 32;
@@ -7,7 +9,7 @@ const int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
 const int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
 
 struct VoxelChunk {
-    int voxels[CHUNK_WIDTH_VOXELS][CHUNK_WIDTH_VOXELS][CHUNK_HEIGHT_VOXELS];
+    int8_t voxels[CHUNK_WIDTH_VOXELS][CHUNK_WIDTH_VOXELS][CHUNK_HEIGHT_VOXELS];
 };
 
 layout(push_constant) uniform PushConstants {
@@ -25,6 +27,10 @@ layout(std430, binding = 1, row_major) readonly buffer VoxelChunkIn {
     VoxelChunk chunkIn;
 };
 
+/* Chunking */
+const int DRAW_DISTANCE = 1;
+
+/* Rendering */
 const int SAMPLES = 1;
 const int MAX_STEPS = 10000;
 const int MAX_BOUNCES = 4;
@@ -40,29 +46,14 @@ float random(vec2 st) {
 }
 
 /*
-1 if there is a voxel, 0 otherwise
-*/
-bool voxelVolume(ivec3 voxel) {
-    if (voxel.z > 58)
-        return false;
-    if (voxel.x >= 10 && voxel.x <= 20)
-        return true;
-    if (voxel.y >= 10 && voxel.y <= 20)
-        return true;
-    if (voxel.z > 50)
-        return false;
-    return (voxel.x + voxel.y + voxel.z) % 2 == 0;
-}
-
-/*
 Wrapper around array to prevent invalid access
 */
-int getVoxel(ivec3 voxel) {
+int8_t getVoxel(ivec3 voxel) {
     if (voxel.x < 0 || voxel.y < 0 || voxel.z < 0) {
-        return 0;
+        return int8_t(0);
     }
     if (voxel.x >= CHUNK_WIDTH_VOXELS || voxel.y >= CHUNK_WIDTH_VOXELS || voxel.z >= CHUNK_HEIGHT_VOXELS) {
-        return 0;
+        return int8_t(0);
     }
     return chunkIn.voxels[voxel.x][voxel.y][voxel.z];// + voxel.y * CHUNK_WIDTH_VOXELS + voxel.z * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS];
 }
@@ -75,7 +66,7 @@ If dist < 0, no intersection
 struct VoxelIntersection {
     float dist;
     vec3 normal;
-    int id;
+    int8_t id;
     ivec3 idx;
 };
 
@@ -111,17 +102,17 @@ VoxelIntersection distanceToVoxelAlongRay(vec3 origin, vec3 direction, float max
     for (; i < MAX_STEPS && totalDist < maxlen; i++) {
         /* Exiting world bounds check */
         if (curPos.x > CHUNK_WIDTH_VOXELS + 1.0 && direction.x >= 0.0)
-            return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
+            return VoxelIntersection(-1.0, vec3(0.0), int8_t(0), ivec3(-1, -1, -1));
         if (curPos.x < -1.0 && direction.x <= 0.0)
-            return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
+            return VoxelIntersection(-1.0, vec3(0.0), int8_t(0), ivec3(-1, -1, -1));
         if (curPos.y > CHUNK_WIDTH_VOXELS + 1.0 && direction.y >= 0.0)
-            return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
+            return VoxelIntersection(-1.0, vec3(0.0), int8_t(0), ivec3(-1, -1, -1));
         if (curPos.y < -1.0 && direction.y <= 0.0)
-            return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
+            return VoxelIntersection(-1.0, vec3(0.0), int8_t(0), ivec3(-1, -1, -1));
         if (curPos.z > CHUNK_HEIGHT_VOXELS + 1.0 && direction.z >= 0.0)
-            return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
+            return VoxelIntersection(-1.0, vec3(0.0), int8_t(0), ivec3(-1, -1, -1));
         if (curPos.z < -1.0 && direction.z <= 0.0)
-            return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1, -1, -1));
+            return VoxelIntersection(-1.0, vec3(0.0), int8_t(0), ivec3(-1, -1, -1));
         // For each axis, coordinate of the next plane we will reach
         vec3 nextPlaneCoords = vec3(0.0);
         // next plane in positive and negative directions
@@ -163,7 +154,7 @@ VoxelIntersection distanceToVoxelAlongRay(vec3 origin, vec3 direction, float max
             normal.z = -rayAxesDirections.z;
         }
         // We should now be intersecting a plane - is there a voxel face at that intersection?
-        int v = getVoxel(curVoxel);
+        int8_t v = getVoxel(curVoxel);
         /*
         Value is the distance to closest voxel from any point in the voxel,
         rounded down - if at least 2, we can skip some iterations
@@ -174,10 +165,10 @@ VoxelIntersection distanceToVoxelAlongRay(vec3 origin, vec3 direction, float max
         }
         /* Value is voxel id */
         else if (v < 0) {
-            return VoxelIntersection(totalDist / VOXELS_PER_METER, normal, v * -1, curVoxel);
+            return VoxelIntersection(totalDist / VOXELS_PER_METER, normal, -v, curVoxel);
         }
     }
-    return VoxelIntersection(-1.0, vec3(0.0), 0, ivec3(-1));
+    return VoxelIntersection(-1.0, vec3(0.0), int8_t(0), ivec3(-1));
 }
 
 const float shadowOffset = 0.0001;
@@ -241,8 +232,9 @@ vec3 prettierNormalColor(vec3 normal) {
 /*
 Voxel color lookup table
 */
-vec3 voxelColor(int idx) {
-    switch(idx) {
+vec3 voxelColor(int8_t idx) {
+    int idx_int = int(idx);
+    switch(idx_int) {
     case 1: // Stone
         return vec3(50.0, 54.0, 38.0) / 255.0;
     case 2: // Dirt
@@ -261,8 +253,9 @@ vec3 voxelColor(int idx) {
 /*
 Color variance strength lookup
 */
-float voxelColorVariance(int idx) {
-    switch(idx) {
+float voxelColorVariance(int8_t idx) {
+    int idx_int = int(idx);
+    switch(idx_int) {
     case 1: // Stone
         return 0.01;
     case 2: // Dirt

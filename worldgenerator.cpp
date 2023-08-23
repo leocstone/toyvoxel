@@ -1,8 +1,9 @@
 #include "worldgenerator.h"
 #include <iostream>
 #include <random>
+#include <cstring>
 
-constexpr int max_search_radius = CHUNK_HEIGHT_VOXELS;
+constexpr int max_search_radius = 64;
 
 static std::random_device rd;
 static std::mt19937 rng{rd()};
@@ -25,29 +26,35 @@ static void boundsCheck(int x, int y, int z) {
 /* Return the distance in voxels (rounded down) to the nearest voxel to tx,ty,tz */
 /* i.e. 0 if there is an adjacent voxel */
 static int findClosestVoxel(int tx, int ty, int tz, VoxelChunk* chunkIn) {
-    //std::cout << "Finding closest voxel to " << tx << " " << ty << " " << tz << std::endl;
+    std::cout << "Finding closest voxel to " << tx << " " << ty << " " << tz << std::endl;
     for (int radius = 1; radius < max_search_radius; radius++) {
         /* Each loop counter is the offset from (tx,ty,tz) */
         /* +X Plane */
         int x = tx + radius;
         int y, z;
         if (x < CHUNK_WIDTH_VOXELS) {
-            for (y = std::max(0, ty - radius); (y < ty + radius) && (y < CHUNK_WIDTH_VOXELS); y++) {
-                for (z = std::max(0, tz - radius); (z < tz + radius) && (z < CHUNK_HEIGHT_VOXELS); z++) {
+            for (y = std::max(0, ty - radius); (y <= ty + radius) && (y < CHUNK_WIDTH_VOXELS); y++) {
+                for (z = std::max(0, tz - radius); (z <= tz + radius) && (z < CHUNK_HEIGHT_VOXELS); z++) {
                     boundsCheck(x, y, z);
-                    if (chunkIn->getVoxel(x, y, z) < 0)
+                    std::cout << "Checking " << x << ", " << y << ", " << z << std::endl;
+                    if (chunkIn->getVoxel(x, y, z) < 0) {
+                        std::cout << "Found closest voxel at " << x << ", " << y << ", " << z << ". radius = " << radius << std::endl;
                         return radius - 1;
+                    }
                 }
             }
         }
         /* -X Plane */
         x = tx - radius;
         if (x > 0) {
-            for (y = std::max(0, ty - radius); (y < ty + radius) && (y < CHUNK_WIDTH_VOXELS); y++) {
-                for (z = std::max(0, tz - radius); (z < tz + radius) && (z < CHUNK_HEIGHT_VOXELS); z++) {
+            for (y = std::max(0, ty - radius); (y <= ty + radius) && (y < CHUNK_WIDTH_VOXELS); y++) {
+                for (z = std::max(0, tz - radius); (z <= tz + radius) && (z < CHUNK_HEIGHT_VOXELS); z++) {
                     boundsCheck(x, y, z);
-                    if (chunkIn->getVoxel(x, y, z) < 0)
+                    std::cout << "Checking " << x << ", " << y << ", " << z << std::endl;
+                    if (chunkIn->getVoxel(x, y, z) < 0) {
+                        std::cout << "Found closest voxel at " << x << ", " << y << ", " << z << ". radius = " << radius << std::endl;
                         return radius - 1;
+                    }
                 }
             }
         }
@@ -57,8 +64,11 @@ static int findClosestVoxel(int tx, int ty, int tz, VoxelChunk* chunkIn) {
             for (x = std::max(0, tx - radius + 1); (x < tx + radius - 1) && (x < CHUNK_WIDTH_VOXELS); x++) {
                 for (z = std::max(0, tz - radius); (z < tz + radius) && (z < CHUNK_HEIGHT_VOXELS); z++) {
                     boundsCheck(x, y, z);
-                    if (chunkIn->getVoxel(x, y, z) < 0)
+                    std::cout << "Checking " << x << ", " << y << ", " << z << std::endl;
+                    if (chunkIn->getVoxel(x, y, z) < 0) {
+                        std::cout << "Found closest voxel at " << x << ", " << y << ", " << z << ". radius = " << radius << std::endl;
                         return radius - 1;
+                    }
                 }
             }
         }
@@ -68,8 +78,11 @@ static int findClosestVoxel(int tx, int ty, int tz, VoxelChunk* chunkIn) {
             for (x = std::max(0, tx - radius + 1); (x < tx + radius - 1) && (x < CHUNK_WIDTH_VOXELS); x++) {
                 for (z = std::max(0, tz - radius); (z < tz + radius) && (z < CHUNK_HEIGHT_VOXELS); z++) {
                     boundsCheck(x, y, z);
-                    if (chunkIn->getVoxel(x, y, z) < 0)
+                    std::cout << "Checking " << x << ", " << y << ", " << z << std::endl;
+                    if (chunkIn->getVoxel(x, y, z) < 0) {
+                        std::cout << "Found closest voxel at " << x << ", " << y << ", " << z << ". radius = " << radius << std::endl;
                         return radius - 1;
+                    }
                 }
             }
         }
@@ -79,8 +92,11 @@ static int findClosestVoxel(int tx, int ty, int tz, VoxelChunk* chunkIn) {
             for (x = std::max(0, tx - radius + 1); (x < tx + radius - 1) && (x < CHUNK_WIDTH_VOXELS); x++) {
                 for (y = std::max(0, ty - radius + 1); (y < ty + radius - 1) && (y < CHUNK_WIDTH_VOXELS); y++) {
                     boundsCheck(x, y, z);
-                    if (chunkIn->getVoxel(x, y, z) < 0)
+                    std::cout << "Checking " << x << ", " << y << ", " << z << std::endl;
+                    if (chunkIn->getVoxel(x, y, z) < 0) {
+                        std::cout << "Found closest voxel at " << x << ", " << y << ", " << z << ". radius = " << radius << std::endl;
                         return radius - 1;
+                    }
                 }
             }
         }
@@ -90,31 +106,17 @@ static int findClosestVoxel(int tx, int ty, int tz, VoxelChunk* chunkIn) {
             for (x = std::max(0, tx - radius + 1); (x < tx + radius - 1) && (x < CHUNK_WIDTH_VOXELS); x++) {
                 for (y = std::max(0, ty - radius + 1); (y < ty + radius - 1) && (y < CHUNK_WIDTH_VOXELS); y++) {
                     boundsCheck(x, y, z);
-                    if (chunkIn->getVoxel(x, y, z) < 0)
+                    std::cout << "Checking " << x << ", " << y << ", " << z << std::endl;
+                    if (chunkIn->getVoxel(x, y, z) < 0) {
+                        std::cout << "Found closest voxel at " << x << ", " << y << ", " << z << ". radius = " << radius << std::endl;
                         return radius - 1;
+                    }
                 }
             }
         }
     }
+    std::cout << "No voxel close enough to " << tx << ", " << ty << ", " << tz << std::endl;
     return 0; // Shouldn't happen unless entire map is empty or max search dist reached
-}
-
-/* Fill out all zero voxels with the distances to closest voxel */
-static void computeDistances(VoxelChunk* chunkIn) {
-    std::cout << "Computing distances. Total to compute: " << CHUNK_WIDTH_VOXELS << " ^2 * " << CHUNK_HEIGHT_VOXELS << std::endl;
-    for (int x = 0; x < CHUNK_WIDTH_METERS * VOXELS_PER_METER; x++) {
-        for (int y = 0; y < CHUNK_WIDTH_METERS * VOXELS_PER_METER; y++) {
-            for (int z = 0; z < CHUNK_HEIGHT_METERS * VOXELS_PER_METER; z++) {
-                boundsCheck(x, y, z);
-                if (chunkIn->getVoxel(x, y, z) == 0) {
-                    chunkIn->setVoxel(x, y, z, findClosestVoxel(x, y, z, chunkIn));
-                }
-            }
-        }
-        std::cout << "\r" << x + 1 << " / " << CHUNK_WIDTH_METERS * VOXELS_PER_METER;
-        std::cout.flush();
-    }
-    std::cout << std::endl;
 }
 
 static VoxelChunk* basicPerlinTest() {
@@ -347,6 +349,7 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
 
     treeChain.addLink(trunkLink);
 
+    /*
     // Add L1 branches
     constexpr int min_branches = 10;
     constexpr int max_branches = 10;
@@ -375,7 +378,7 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
         glm::vec3 curBranchEnd = curBranchStart + curBranchLength * curBranchDirection;
 
         SDFLink curBranch;
-        branchCones[branch] = SDFCurvedXYCone(curBranchLength, l1Thickness, l1Thickness * 0.9, 1.0, 1.0);
+        branchCones[branch] = SDFCurvedXYCone(curBranchLength, l1Thickness, l1Thickness * 0.9, 2.0, 1.0);
         curBranch.s = (SDF*)&branchCones[branch];
         curBranch.t = SDFTransformOp();
         curBranch.t.addTranslation(curBranchStart);
@@ -383,6 +386,7 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
         curBranch.c = &smooth;
         treeChain.addLink(curBranch);
     }
+    */
 
     for (int x = 0; x < result->sizeX; x++) {
         for (int y = 0; y < result->sizeY; y++) {
@@ -399,7 +403,7 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
             }
         }
     }
-    delete[] branchCones;
+    //delete[] branchCones;
 
     return result;
 }
@@ -446,8 +450,106 @@ static VoxelChunk* forestTest() {
     return dst;
 }
 
+static VoxelChunk* simpleChunk() {
+    VoxelChunk* result = new VoxelChunk();
+
+    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
+        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
+            for (int z = 0; z < 8; z++) {
+                result->voxels[x][y][z] = -4;
+            }
+        }
+    }
+
+    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
+        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
+            for (int z = 8; z < CHUNK_HEIGHT_VOXELS; z++) {
+                result->voxels[x][y][z] = 0;
+            }
+        }
+    }
+
+    return result;
+}
+
+static VoxelChunk* alternating() {
+    VoxelChunk* result = new VoxelChunk();
+    memset(result->voxels, 0, CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * CHUNK_HEIGHT_VOXELS);
+    /*
+    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
+        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
+            for (int z = 0; z < CHUNK_HEIGHT_VOXELS; z++) {
+                result->voxels[x][y][z] = 0;//((x + y + z) % 32 == 0) ? -7 : 0;
+            }
+        }
+    }
+    */
+    result->voxels[0][0][0] = -1;
+    result->voxels[CHUNK_WIDTH_VOXELS-1][0][0] = -1;
+    result->voxels[0][CHUNK_WIDTH_VOXELS-1][0] = -1;
+    result->voxels[CHUNK_WIDTH_VOXELS-1][CHUNK_WIDTH_VOXELS-1][0] = -1;
+
+    result->voxels[0][0][CHUNK_HEIGHT_VOXELS-1] = -1;
+    result->voxels[CHUNK_WIDTH_VOXELS-1][0][CHUNK_HEIGHT_VOXELS-1] = -1;
+    result->voxels[0][CHUNK_WIDTH_VOXELS-1][CHUNK_HEIGHT_VOXELS-1] = -1;
+    result->voxels[CHUNK_WIDTH_VOXELS-1][CHUNK_WIDTH_VOXELS-1][CHUNK_HEIGHT_VOXELS-1] = -1;
+    return result;
+}
+
+static int findClosestVoxelSafe(int tx, int ty, int tz, VoxelChunk* chunkIn) {
+    for (int radius = 1; radius < max_search_radius; radius++) {
+        for (int x = tx - radius; x < tx + radius + 1; x++) {
+            if (x < 0 || x >= CHUNK_WIDTH_VOXELS)
+                continue;
+            for (int y = ty - radius; y < ty + radius + 1; y++) {
+                if (y < 0 || y >= CHUNK_WIDTH_VOXELS)
+                    continue;
+                for (int z = tz - radius; z < tz + radius + 1; z++) {
+                    if (z < 0 || z >= CHUNK_WIDTH_VOXELS)
+                        continue;
+                    boundsCheck(x, y, z);
+                    if (chunkIn->getVoxel(x, y, z) < 0) {
+                        /*
+                        std::cout << "Found closest voxel for " << tx << ", " << ty << ", " << tz
+                                                      << " at " << x << ", " << y << ", " << z
+                                                      << ". radius = " << radius <<
+                                                      ", value = " << int(chunkIn->voxels[x][y][z]) << std::endl;
+                        */
+                        assert(x == 0 || x == CHUNK_WIDTH_VOXELS-1 || y == 0 || y == CHUNK_WIDTH_VOXELS-1 || z == 0 || z == CHUNK_HEIGHT_VOXELS-1);
+                        return radius - 1;
+                    }
+                }
+            }
+        }
+    }
+    std::cout << "No voxel close enough to " << tx << ", " << ty << ", " << tz << std::endl;
+    return 0;
+}
+
+/* Fill out all zero voxels with the distances to closest voxel */
+static void computeDistances(VoxelChunk* chunkIn) {
+    std::cout << "Computing distances. Total to compute: " << CHUNK_WIDTH_VOXELS << " ^2 * " << CHUNK_HEIGHT_VOXELS << std::endl;
+    for (int x = 0; x < CHUNK_WIDTH_METERS * VOXELS_PER_METER; x++) {
+        for (int y = 0; y < CHUNK_WIDTH_METERS * VOXELS_PER_METER; y++) {
+            for (int z = 0; z < CHUNK_HEIGHT_METERS * VOXELS_PER_METER; z++) {
+                //boundsCheck(x, y, z);
+                if (chunkIn->getVoxel(x, y, z) == 0) {
+                    chunkIn->setVoxel(x, y, z, findClosestVoxelSafe(x, y, z, chunkIn));
+                }
+            }
+        }
+        //std::cout << "\r" << x + 1 << " / " << CHUNK_WIDTH_METERS * VOXELS_PER_METER;
+        //std::cout.flush();
+    }
+    //std::cout << std::endl;
+}
+
 VoxelChunk* WorldGenerator::generateChunk() {
     VoxelChunk* result = forestTest();
     //computeDistances(result);
+    result->voxels[0][0][CHUNK_HEIGHT_VOXELS-1] = -1;
+    result->voxels[CHUNK_WIDTH_VOXELS-1][0][CHUNK_HEIGHT_VOXELS-1] = -1;
+    result->voxels[0][CHUNK_WIDTH_VOXELS-1][CHUNK_HEIGHT_VOXELS-1] = -1;
+    result->voxels[CHUNK_WIDTH_VOXELS-1][CHUNK_WIDTH_VOXELS-1][CHUNK_HEIGHT_VOXELS-1] = -1;
     return result;
 }

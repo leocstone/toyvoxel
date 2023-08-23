@@ -6,7 +6,6 @@ free floating - no background
 */
 void FontRenderer::addMeshForLabel(FontMesh& result, const char* label, const glm::vec2& origin) {
     int numChars = strlen(label);
-    double textWidth = numChars * glyphWidthScreen;
     size_t curIndex = result.vert.size();
     glm::vec2 curOrigin = origin;
     for (int i = 0; i < numChars; i++) {
