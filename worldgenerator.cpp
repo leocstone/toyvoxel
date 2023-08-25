@@ -119,110 +119,6 @@ static int findClosestVoxel(int tx, int ty, int tz, VoxelChunk* chunkIn) {
     return 0; // Shouldn't happen unless entire map is empty or max search dist reached
 }
 
-static VoxelChunk* basicPerlinTest() {
-    VoxelChunk* result = new VoxelChunk();
-
-    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
-        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
-            for (int z = 0; z < CHUNK_HEIGHT_VOXELS; z++) {
-                constexpr double scale_factor = 32.0;
-                constexpr double scale_factor_surface = 32.0;
-                if (z >= 60.0 * VOXELS_PER_METER) {
-                    double height = Perlin::perlin(double(x) / scale_factor_surface, double(y) / scale_factor_surface, double(60 * VOXELS_PER_METER) / scale_factor_surface) * 4.0 + 60.0 * VOXELS_PER_METER;
-                    result->setVoxel(x, y, z, (z <= height) ? -3 : 0);
-                } else if (z >= 53.0 * VOXELS_PER_METER) {
-                    result->setVoxel(x, y, z, -2);
-                } else {
-                    int voxel = (Perlin::perlin(double(x) / scale_factor, double(y) / scale_factor, double(z) / scale_factor) < 0.5) ? randomStoneMutation() * -1 : 0;
-                    result->setVoxel(x, y, z, voxel);
-                }
-            }
-        }
-    }
-
-    return result;
-}
-
-static VoxelChunk* erosionTest() {
-    VoxelChunk* result = new VoxelChunk();
-
-    /* Simple 2d perlin as heightmap */
-    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
-        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
-            for (int z = 0; z < CHUNK_HEIGHT_VOXELS; z++) {
-                constexpr double scale_factor = 32.0;
-                double height = Perlin::perlin(double(x) / scale_factor, double(y) / scale_factor, 55.0) * VOXELS_PER_METER * 14.0;
-                int voxel = (z <= height) ? -3 : 0;
-                result->setVoxel(x, y, z, voxel);
-            }
-        }
-    }
-
-    /* Erode */
-    constexpr int EROSION_ITERATIONS = CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * 64;
-    std::uniform_int_distribution<int> randomPosition(0, CHUNK_WIDTH_VOXELS);
-    std::uniform_int_distribution<int> randomDirection(0, 3);
-    std::cout << "Erosion simulation starting." << std::endl;
-    for (int iteration = 0; iteration < EROSION_ITERATIONS; iteration++) {
-        int curX = randomPosition(rng);
-        int curY = randomPosition(rng);
-
-        // Droplet starts at top of world
-        int height = CHUNK_HEIGHT_VOXELS - 1;
-        int carriedVoxel = 0;
-        /* Pick up carried voxel */
-        while (height > 0 && (result->getVoxel(curX, curY, height) == 0)) {
-            height--;
-        }
-        carriedVoxel = result->getVoxel(curX, curY, height);
-        result->setVoxel(curX, curY, height, 0);
-        if (carriedVoxel == 0)
-            continue;
-        // Trace the path of the droplet from impact point
-        float energy = 1.0f; // Droplet starts at terminal velocity (1)
-        while (energy > 0.0f) {
-            /* First, check for falling down (no energy) */
-            while (height > 0 && (result->getVoxel(curX, curY, height - 1) == 0)) {
-                height--;
-            }
-
-            /* Check to move sideways and use energy */
-            /* 1: +x 2: -x 3: +y 4: -y */
-            int curRandDirections[4][2] = {{1, 0},{-1, 0},{0, 1},{0, -1}};
-            /* Shuffle the directions so we are guaranteed to get one of each in any given 4 samples */
-            constexpr int swaps = 4;
-            for (int s = 0; s < swaps; s++) {
-                int idx1 = randomDirection(rng);
-                int idx2 = randomDirection(rng);
-                int tmp[2] = {curRandDirections[idx2][0], curRandDirections[idx2][1]};
-                curRandDirections[idx2][0] = curRandDirections[idx1][0];
-                curRandDirections[idx2][1] = curRandDirections[idx1][1];
-                curRandDirections[idx1][0] = tmp[0];
-                curRandDirections[idx1][1] = tmp[1];
-            }
-            bool madeMove = false;
-            for (int i = 0; i < 4 && (!madeMove); i++) {
-                int sampledX = curX + curRandDirections[i][0];
-                int sampledY = curY + curRandDirections[i][1];
-                if ((sampledX >= 0 && sampledX < CHUNK_WIDTH_VOXELS) && (sampledY >= 0 && sampledY < CHUNK_WIDTH_VOXELS)) {
-                    if (result->getVoxel(sampledX, sampledY, height) == 0) {
-                        curX = sampledX;
-                        curY = sampledY;
-                        energy -= 0.1f;
-                        madeMove = true;
-                    }
-                }
-            }
-            if (!madeMove)
-                break;
-        }
-        result->setVoxel(curX, curY, height, carriedVoxel);
-    }
-    std::cout << std::endl;
-
-    return result;
-}
-
 static int randomGrassBend(int b) {
     if (b >= 9) {
         return 1;
@@ -232,8 +128,7 @@ static int randomGrassBend(int b) {
     return 0;
 }
 
-static VoxelChunk* grassTest(double minHeight) {
-    VoxelChunk* result = new VoxelChunk();
+static void grassTest(VoxelChunk* result, double minHeight) {
     const float allStoneHeight = minHeight * 0.1f; // Everything below 10% of minHeight is all stone
     std::uniform_int_distribution<int> stoneChance(0, 500);
     constexpr double stone_scale_factor = 32.0;
@@ -293,8 +188,6 @@ static VoxelChunk* grassTest(double minHeight) {
             result->setVoxel(placedX, placedY, minHeight + h, -3);
         }
     }
-
-    return result;
 }
 
 /*
@@ -349,7 +242,7 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
 
     treeChain.addLink(trunkLink);
 
-    /*
+
     // Add L1 branches
     constexpr int min_branches = 10;
     constexpr int max_branches = 10;
@@ -386,7 +279,6 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
         curBranch.c = &smooth;
         treeChain.addLink(curBranch);
     }
-    */
 
     for (int x = 0; x < result->sizeX; x++) {
         for (int y = 0; y < result->sizeY; y++) {
@@ -403,7 +295,7 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
             }
         }
     }
-    //delete[] branchCones;
+    delete[] branchCones;
 
     return result;
 }
@@ -418,16 +310,16 @@ static void blitVoxels(VoxelChunk* dst, VoxelFragment* src, int sx, int sy, int 
                 //int dstIndex = (sx + x) + (sy + y) * CHUNK_WIDTH_VOXELS + (sz + z) * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS;
                 int srcIndex = x + y * src->sizeX + z * src->sizeX * src->sizeY;
                 if (src->voxels[srcIndex] < 0) {
-                    dst->voxels[sx + x][sy + y][sz + z] = src->voxels[srcIndex];
+                    dst->setVoxel(sx + x, sy + y, sz + z, src->voxels[srcIndex]);
                 }
             }
         }
     }
 }
 
-static VoxelChunk* forestTest() {
+static void forestTest(VoxelChunk* dst) {
     double grassHeight = 128;
-    VoxelChunk* dst = grassTest(grassHeight);
+    grassTest(dst, grassHeight);
     /*
     for (int x = 0; x < VOXELS_PER_METER; x++) {
         for (int y = 0; y < VOXELS_PER_METER; y++) {
@@ -442,58 +334,13 @@ static VoxelChunk* forestTest() {
         }
     }
     */
-    const glm::vec3 treeDimensions(5, 5, 28);
+    const glm::vec3 treeDimensions(5, 5, 20);
     VoxelFragment* src = proceduralTree(treeDimensions);
-    blitVoxels(dst, src, CHUNK_WIDTH_VOXELS / 2 - (treeDimensions.x / 2) * VOXELS_PER_METER, CHUNK_WIDTH_VOXELS / 2 - (treeDimensions.y / 2) * VOXELS_PER_METER, int(grassHeight));
+    std::uniform_int_distribution<int> randomTreeX(0, CHUNK_WIDTH_VOXELS - src->sizeX - 1);
+    int randomX = randomTreeX(rng);
+    int randomY = randomTreeX(rng);
+    blitVoxels(dst, src, randomX, randomY, int(grassHeight));
     delete[] src->voxels;
-
-    return dst;
-}
-
-static VoxelChunk* simpleChunk() {
-    VoxelChunk* result = new VoxelChunk();
-
-    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
-        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
-            for (int z = 0; z < 8; z++) {
-                result->voxels[x][y][z] = -4;
-            }
-        }
-    }
-
-    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
-        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
-            for (int z = 8; z < CHUNK_HEIGHT_VOXELS; z++) {
-                result->voxels[x][y][z] = 0;
-            }
-        }
-    }
-
-    return result;
-}
-
-static VoxelChunk* alternating() {
-    VoxelChunk* result = new VoxelChunk();
-    memset(result->voxels, 0, CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * CHUNK_HEIGHT_VOXELS);
-    /*
-    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
-        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
-            for (int z = 0; z < CHUNK_HEIGHT_VOXELS; z++) {
-                result->voxels[x][y][z] = 0;//((x + y + z) % 32 == 0) ? -7 : 0;
-            }
-        }
-    }
-    */
-    result->voxels[0][0][0] = -1;
-    result->voxels[CHUNK_WIDTH_VOXELS-1][0][0] = -1;
-    result->voxels[0][CHUNK_WIDTH_VOXELS-1][0] = -1;
-    result->voxels[CHUNK_WIDTH_VOXELS-1][CHUNK_WIDTH_VOXELS-1][0] = -1;
-
-    result->voxels[0][0][CHUNK_HEIGHT_VOXELS-1] = -1;
-    result->voxels[CHUNK_WIDTH_VOXELS-1][0][CHUNK_HEIGHT_VOXELS-1] = -1;
-    result->voxels[0][CHUNK_WIDTH_VOXELS-1][CHUNK_HEIGHT_VOXELS-1] = -1;
-    result->voxels[CHUNK_WIDTH_VOXELS-1][CHUNK_WIDTH_VOXELS-1][CHUNK_HEIGHT_VOXELS-1] = -1;
-    return result;
 }
 
 static int findClosestVoxelSafe(int tx, int ty, int tz, VoxelChunk* chunkIn) {
@@ -544,12 +391,7 @@ static void computeDistances(VoxelChunk* chunkIn) {
     //std::cout << std::endl;
 }
 
-VoxelChunk* WorldGenerator::generateChunk() {
-    VoxelChunk* result = forestTest();
+void WorldGenerator::generateChunk(VoxelChunk* result) {
+    forestTest(result);
     //computeDistances(result);
-    result->voxels[0][0][CHUNK_HEIGHT_VOXELS-1] = -1;
-    result->voxels[CHUNK_WIDTH_VOXELS-1][0][CHUNK_HEIGHT_VOXELS-1] = -1;
-    result->voxels[0][CHUNK_WIDTH_VOXELS-1][CHUNK_HEIGHT_VOXELS-1] = -1;
-    result->voxels[CHUNK_WIDTH_VOXELS-1][CHUNK_WIDTH_VOXELS-1][CHUNK_HEIGHT_VOXELS-1] = -1;
-    return result;
 }

@@ -74,10 +74,7 @@ const std::vector<uint16_t> indices = {
 
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
-const uint32_t RENDER_SCALE = 4;
-
-/* Number of chunks around the player to load */
-const int DRAW_DISTANCE = 1;
+const uint32_t RENDER_SCALE = 3;
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
@@ -684,7 +681,7 @@ private:
         vkDestroyFence(device, computeDistanceFence, nullptr);
 
         for (int i = 1; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            copyBuffer(voxelBuffers[0], voxelBuffers[i], sizeof(VoxelChunk));
+            copyBuffer(voxelBuffers[0], voxelBuffers[i], sizeof(LoadedChunks));
         }
     }
 
@@ -779,7 +776,7 @@ private:
         vkDestroyFence(device, computeDistanceFence, nullptr);
 
         for (int i = 1; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            copyBuffer(voxelBuffers[0], voxelBuffers[i], sizeof(VoxelChunk));
+            copyBuffer(voxelBuffers[0], voxelBuffers[i], CHUNK_SIZE_BYTES);
         }
     }
     */
@@ -960,7 +957,7 @@ private:
             VkDescriptorBufferInfo voxelBufferInfo {};
             voxelBufferInfo.buffer = voxelBuffers[i];
             voxelBufferInfo.offset = 0;
-            voxelBufferInfo.range = sizeof(VoxelChunk);
+            voxelBufferInfo.range = VK_WHOLE_SIZE;
 
             std::array<VkWriteDescriptorSet, 2> descriptorWrites {};
 
@@ -1518,29 +1515,41 @@ private:
     }
 
     void createVoxelBuffers() {
-        std::cout << "Creating a voxel buffer of size " << sizeof(VoxelChunk) << std::endl;
-        VoxelChunk* chunk = WorldGenerator::generateChunk();
+        size_t voxelBufferSize = sizeof(LoadedChunks);
+        std::cout << "Creating a voxel buffer of size " << voxelBufferSize << std::endl;
+        LoadedChunks* chunks = new LoadedChunks;
+        std::cout << "Generating chunks: 0 / " << TOTAL_CHUNKS_LOADED;
+        std::cout.flush();
+        for (int x = 0; x < LOADED_CHUNKS_AXIS; x++) {
+            for (int y = 0; y < LOADED_CHUNKS_AXIS; y++) {
+                VoxelChunk v(chunks, x, y);
+                WorldGenerator::generateChunk(&v);
+                std::cout << "\rGenerating chunks: " << x * LOADED_CHUNKS_AXIS + y + 1 << " / " << TOTAL_CHUNKS_LOADED;
+                std::cout.flush();
+            }
+        }
+        std::cout << std::endl;
 
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
-        createBuffer(sizeof(VoxelChunk), VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+        createBuffer(voxelBufferSize, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
         void* data;
-        vkMapMemory(device, stagingBufferMemory, 0, sizeof(VoxelChunk), 0, &data);
-            memcpy(data, chunk->voxels, sizeof(VoxelChunk));
+        vkMapMemory(device, stagingBufferMemory, 0, voxelBufferSize, 0, &data);
+            memcpy(data, &chunks->voxels, voxelBufferSize);
         vkUnmapMemory(device, stagingBufferMemory);
-        delete chunk;
+        delete chunks;
 
         voxelBuffers.resize(MAX_FRAMES_IN_FLIGHT);
         voxelBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
 
         for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            createBuffer(sizeof(VoxelChunk), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            createBuffer(voxelBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, voxelBuffers[i],
                                     voxelBuffersMemory[i]);
-            copyBuffer(stagingBuffer, voxelBuffers[i], sizeof(VoxelChunk));
+            copyBuffer(stagingBuffer, voxelBuffers[i], voxelBufferSize);
         }
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
@@ -2853,8 +2862,6 @@ private:
             const auto end_time = std::chrono::high_resolution_clock::now();
             const float frameTime = std::chrono::duration<float, std::chrono::seconds::period>(end_time - start).count();
             lastFrameFps = 1 / frameTime;
-            timeSpentRendering += frameTime;
-            frameCounter++;
         }
         std::cout << "Frames rendered: " << frameCounter << std::endl;
         std::cout << "Time taken: " << timeSpentRendering << std::endl;
@@ -3134,6 +3141,55 @@ private:
         glfwTerminate();
     }
 };
+
+/*
+struct Matrix2D {
+    int8_t matrix[3][3];
+};
+
+struct MatrixFlat {
+    int8_t matrix_flat[9];
+};
+
+void testCppArrays() {
+    std::cout << "sizeof(Matrix2D) == " << sizeof(Matrix2D) << std::endl;
+    std::cout << "sizeof(MatrixFlat) == " << sizeof(MatrixFlat) << std::endl;
+    Matrix2D m2d;
+    MatrixFlat mf;
+    for (int x = 0; x < 3; x++) {
+        for (int y = 0; y < 3; y++) {
+            m2d.matrix[x][y] = x + y * 3;
+            mf.matrix_flat[x + y * 3] = x + y * 3;
+        }
+    }
+    std::cout << "2D:" << std::endl;
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 3; x++) {
+            std::cout << "\t(" << x << ", " << y << ") offset: " << &m2d.matrix[y][x] - reinterpret_cast<int8_t*>(&m2d) << " content: " << int(m2d.matrix[y][x]) << std::endl;
+        }
+    }
+    std::cout << "Flat:" << std::endl;
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 3; x++) {
+            std::cout << "\t(" << int(mf.matrix_flat[x + y * 3]) << std::endl;
+        }
+    }
+    std::cout << "2D:" << std::endl;
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 3; x++) {
+            std::cout << "\t(" << int(m2d.matrix[x][y]) << std::endl;
+        }
+    }
+
+    std::cout << "Flat:" << std::endl;
+
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 3; x++) {
+            std::cout << "\t(" << int(mf.matrix_flat[x + y * 3]) << std::endl;
+        }
+    }
+}
+*/
 
 int main() {
     std::cout << ANSI::escape("------------------------------------yesheng-------------------------------------", BOLD, FG_DEFAULT) << std::endl;

@@ -26,13 +26,39 @@ constexpr int VOXELS_PER_METER = 16;
 constexpr int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
 constexpr int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
 
+constexpr size_t CHUNK_SIZE_BYTES = sizeof(Voxel) * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * CHUNK_HEIGHT_VOXELS;
+
+/* Number of chunks around the player to load */
+const int DRAW_DISTANCE = 4;
+const int LOADED_CHUNKS_AXIS = DRAW_DISTANCE * 2 + 1;
+const int TOTAL_CHUNKS_LOADED = LOADED_CHUNKS_AXIS * LOADED_CHUNKS_AXIS;
+
+struct LoadedChunks {
+    int8_t voxels[LOADED_CHUNKS_AXIS * CHUNK_WIDTH_VOXELS][LOADED_CHUNKS_AXIS * CHUNK_WIDTH_VOXELS][CHUNK_HEIGHT_VOXELS];
+    Voxel getVoxel(int chunkX, int chunkY, int x, int y, int z) {
+        return voxels[chunkX * CHUNK_WIDTH_VOXELS + x][chunkY * CHUNK_WIDTH_VOXELS + y][z];
+    }
+    void setVoxel(int chunkX, int chunkY, int x, int y, int z, Voxel v) {
+        voxels[chunkX * CHUNK_WIDTH_VOXELS + x][chunkY * CHUNK_WIDTH_VOXELS + y][z] = v;
+    }
+};
+
 struct VoxelChunk {
-    Voxel voxels[CHUNK_WIDTH_VOXELS][CHUNK_WIDTH_VOXELS][CHUNK_HEIGHT_VOXELS];
+    LoadedChunks* world;
+    int chunkX;
+    int chunkY;
+
+    VoxelChunk(LoadedChunks* _world, int _chunkX, int _chunkY) {
+        world = _world;
+        chunkX = _chunkX;
+        chunkY = _chunkY;
+    }
+
     Voxel getVoxel(int x, int y, int z) {
-        return voxels[x][y][z];
+        return world->getVoxel(chunkX, chunkY, x, y, z);
     }
     void setVoxel(int x, int y, int z, const Voxel& v) {
-        voxels[x][y][z] = v;
+        world->setVoxel(chunkX, chunkY, x, y, z, v);
     }
 };
 
@@ -64,7 +90,7 @@ class WorldGenerator
 public:
     WorldGenerator() {}
 
-    static VoxelChunk* generateChunk();
+    static void generateChunk(VoxelChunk* result);
 
 private:
 };
