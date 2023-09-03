@@ -1,7 +1,6 @@
 #ifndef PRIMITIVE_H
 #define PRIMITIVE_H
 #include "sdf.h"
-
 /* Simple sphere at origin */
 class SDFSphere : public SDF
 {
@@ -12,6 +11,25 @@ public:
     float dist(const glm::vec3& point) { return glm::length(point) - radius; }
 private:
     float radius;
+};
+
+/* AABB, centered at origin */
+class SDFAABB : public SDF
+{
+public:
+    SDFAABB() { dimensions = glm::vec3(0, 0, 0); }
+    SDFAABB(const glm::vec3& _dimensions) {
+        dimensions = _dimensions;
+    }
+    ~SDFAABB() {}
+
+    /* Copied from iq */
+    float dist(const glm::vec3& point) {
+        glm::vec3 q = glm::abs(point) - dimensions;
+        return glm::length(glm::max(glm::max(q.x, glm::max(q.y, q.z)),0.0f)) + glm::min(glm::max(q.x,glm::max(q.y,q.z)),0.0f);
+    }
+private:
+    glm::vec3 dimensions;
 };
 
 /* Cylinder from point a to b with given radius */

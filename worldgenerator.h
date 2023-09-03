@@ -29,7 +29,7 @@ constexpr int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
 constexpr size_t CHUNK_SIZE_BYTES = sizeof(Voxel) * CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS * CHUNK_HEIGHT_VOXELS;
 
 /* Number of chunks around the player to load */
-const int DRAW_DISTANCE = 4;
+const int DRAW_DISTANCE = 1;
 const int LOADED_CHUNKS_AXIS = DRAW_DISTANCE * 2 + 1;
 const int TOTAL_CHUNKS_LOADED = LOADED_CHUNKS_AXIS * LOADED_CHUNKS_AXIS;
 
@@ -90,7 +90,7 @@ class WorldGenerator
 public:
     WorldGenerator() {}
 
-    static void generateChunk(VoxelChunk* result);
+    static void generateChunk(VoxelChunk* result, int chunkX, int chunkY);
 
 private:
 };

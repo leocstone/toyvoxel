@@ -74,7 +74,7 @@ const std::vector<uint16_t> indices = {
 
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
-const uint32_t RENDER_SCALE = 3;
+const uint32_t RENDER_SCALE = 1;
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
@@ -360,8 +360,10 @@ private:
     /* Debug messenger */
     VkDebugUtilsMessengerEXT debugMessenger;
 
-    /* Camera */
+    /* Camera / player */
     Camera camera;
+    glm::ivec2 lastUpdatePlayerChunk;
+
     bool keyPressed[GLFW_KEY_LAST+1];
     double cursorX;
     double cursorY;
@@ -403,6 +405,13 @@ private:
 
         /* Position display */
         snprintf(scratch, 64, "(%.2f, %.2f, %.2f)", camera.position.x, camera.position.y, camera.position.z);
+        labelWidth = fontRenderer.getGlyphWidthScreen() * strlen(scratch) + CONSOLE_MARGIN * 2.0;
+        fontRenderer.addMeshForBG(result, FONT_BG2_UV, cursor, {-1.0 + labelWidth, cursor.y + labelHeight});
+        fontRenderer.addMeshForLabel(result, scratch, {cursor.x + CONSOLE_MARGIN, cursor.y + CONSOLE_MARGIN});
+        cursor.y += labelHeight;
+
+        /* Chunk display */
+        snprintf(scratch, 64, "Chunk: (%d, %d)", lastUpdatePlayerChunk.x, lastUpdatePlayerChunk.y);
         labelWidth = fontRenderer.getGlyphWidthScreen() * strlen(scratch) + CONSOLE_MARGIN * 2.0;
         fontRenderer.addMeshForBG(result, FONT_BG2_UV, cursor, {-1.0 + labelWidth, cursor.y + labelHeight});
         fontRenderer.addMeshForLabel(result, scratch, {cursor.x + CONSOLE_MARGIN, cursor.y + CONSOLE_MARGIN});
@@ -1515,6 +1524,8 @@ private:
     }
 
     void createVoxelBuffers() {
+        lastUpdatePlayerChunk = glm::ivec2(int(camera.position.x) / CHUNK_WIDTH_VOXELS,
+                                           int(camera.position.y) / CHUNK_WIDTH_VOXELS);
         size_t voxelBufferSize = sizeof(LoadedChunks);
         std::cout << "Creating a voxel buffer of size " << voxelBufferSize << std::endl;
         LoadedChunks* chunks = new LoadedChunks;
@@ -1523,7 +1534,7 @@ private:
         for (int x = 0; x < LOADED_CHUNKS_AXIS; x++) {
             for (int y = 0; y < LOADED_CHUNKS_AXIS; y++) {
                 VoxelChunk v(chunks, x, y);
-                WorldGenerator::generateChunk(&v);
+                WorldGenerator::generateChunk(&v, lastUpdatePlayerChunk.x + x - DRAW_DISTANCE, lastUpdatePlayerChunk.y + y - DRAW_DISTANCE);
                 std::cout << "\rGenerating chunks: " << x * LOADED_CHUNKS_AXIS + y + 1 << " / " << TOTAL_CHUNKS_LOADED;
                 std::cout.flush();
             }
@@ -1554,6 +1565,48 @@ private:
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+    void updateChunks() {
+        glm::ivec2 playerChunk = glm::ivec2(int(camera.position.x) / CHUNK_WIDTH_METERS,
+                                             int(camera.position.y) / CHUNK_WIDTH_METERS);
+        if (playerChunk.x != lastUpdatePlayerChunk.x ||
+            playerChunk.y != lastUpdatePlayerChunk.y) {
+            loadNewChunks(playerChunk.x - lastUpdatePlayerChunk.x, playerChunk.y - lastUpdatePlayerChunk.y);
+        }
+    }
+
+    /*
+    Load the new chunks into memory when the player moves.
+    directionX = -1 if player moved in the negative x direction
+                  0 if player did not change x coord
+                  1 if player moved in positive x direction
+                  etc.
+
+    if either directionX or directionY is not one of these values,
+    reload all chunks
+    */
+    void loadNewChunks(int directionX, int directionY) {
+        std::cout << "Player moved in the " << directionX << ", " << directionY << " direction." << std::endl;
+        lastUpdatePlayerChunk = glm::ivec2(int(camera.position.x) / CHUNK_WIDTH_METERS,
+                                           int(camera.position.y) / CHUNK_WIDTH_METERS);
+        glm::ivec2 minChunk(lastUpdatePlayerChunk.x - DRAW_DISTANCE,
+                            lastUpdatePlayerChunk.y - DRAW_DISTANCE);
+        if (directionX == 0 && directionY == 1) {
+            /* Issue CHUNK_WIDTH_VOXELS * LOADED_CHUNKS_AXIS buffer copies */
+        } else if (directionX == 1 && directionY == 0) {
+
+        } else if (directionX == 1 && directionY == 1) {
+
+        } else if (directionX == 0 && directionY == -1) {
+
+        } else if (directionX == -1 && directionY == 0) {
+
+        } else if (directionX == -1 && directionY == -1) {
+
+        } else {
+            return;
+        }
     }
 
     void createDescriptorSets() {
@@ -2859,6 +2912,7 @@ private:
             /** Avoid putting syscalls here - they seem to break the timer **/
             const auto start = std::chrono::high_resolution_clock::now();
             drawFrame();
+            updateChunks();
             const auto end_time = std::chrono::high_resolution_clock::now();
             const float frameTime = std::chrono::duration<float, std::chrono::seconds::period>(end_time - start).count();
             lastFrameFps = 1 / frameTime;
@@ -3158,7 +3212,7 @@ void testCppArrays() {
     MatrixFlat mf;
     for (int x = 0; x < 3; x++) {
         for (int y = 0; y < 3; y++) {
-            m2d.matrix[x][y] = x + y * 3;
+            m2d.matrix[y][x] = x + y * 3;
             mf.matrix_flat[x + y * 3] = x + y * 3;
         }
     }
@@ -3171,13 +3225,13 @@ void testCppArrays() {
     std::cout << "Flat:" << std::endl;
     for (int y = 0; y < 3; y++) {
         for (int x = 0; x < 3; x++) {
-            std::cout << "\t(" << int(mf.matrix_flat[x + y * 3]) << std::endl;
+            std::cout << "\t(" << int(mf.matrix_flat[x + y * 3]) << ")" << std::endl;
         }
     }
     std::cout << "2D:" << std::endl;
     for (int y = 0; y < 3; y++) {
         for (int x = 0; x < 3; x++) {
-            std::cout << "\t(" << int(m2d.matrix[x][y]) << std::endl;
+            std::cout << "\t(" << int(m2d.matrix[x][y]) << ")" << std::endl;
         }
     }
 
@@ -3185,7 +3239,7 @@ void testCppArrays() {
 
     for (int y = 0; y < 3; y++) {
         for (int x = 0; x < 3; x++) {
-            std::cout << "\t(" << int(mf.matrix_flat[x + y * 3]) << std::endl;
+            std::cout << "\t(" << int(mf.matrix_flat[x + y * 3]) << ")" << std::endl;
         }
     }
 }

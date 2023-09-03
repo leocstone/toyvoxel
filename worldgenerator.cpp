@@ -160,8 +160,9 @@ static void grassTest(VoxelChunk* result, double minHeight) {
     //std::cout << " done." << std::endl;
 
     // Grass
-    constexpr int num_grass_blades = int(float(CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS) * 0.9);
-    constexpr int max_height_voxels = 8;
+
+    constexpr int num_grass_blades = int(float(CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS) * 0.3);
+    constexpr int max_height_voxels = 1;
     std::uniform_int_distribution<int> randomCoord(0, CHUNK_WIDTH_VOXELS - 1);
     std::uniform_int_distribution<int> randomHeight(1, max_height_voxels);
     std::uniform_int_distribution<int> randomBend(0, 10);
@@ -188,6 +189,7 @@ static void grassTest(VoxelChunk* result, double minHeight) {
             result->setVoxel(placedX, placedY, minHeight + h, -3);
         }
     }
+
 }
 
 /*
@@ -241,7 +243,6 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
     trunkLink.t = trunkT;
 
     treeChain.addLink(trunkLink);
-
 
     // Add L1 branches
     constexpr int min_branches = 10;
@@ -391,7 +392,29 @@ static void computeDistances(VoxelChunk* chunkIn) {
     //std::cout << std::endl;
 }
 
-void WorldGenerator::generateChunk(VoxelChunk* result) {
-    forestTest(result);
-    //computeDistances(result);
+void WorldGenerator::generateChunk(VoxelChunk* result, int chunkX, int chunkY) {
+    std::cout << "generating " << chunkX << ", " << chunkY << std::endl;
+    double grassHeight = 32;
+    grassTest(result, grassHeight);
+    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
+        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
+            for (int z = 33; z < CHUNK_HEIGHT_VOXELS; z++) {
+                result->setVoxel(x, y, z, std::min(z - 33, 127));
+            }
+        }
+    }
+    // Add building
+    if (chunkX % 2 == 0 && chunkY % 2 == 0) {
+        SDFChain buildingChain;
+        SDFLink wall1Link;
+        SDFAABB wall1AABB(glm::vec3(CHUNK_WIDTH_METERS, 0.2f, CHUNK_HEIGHT_METERS - 2.0f));
+        SDFTransformOp wall1T;
+        for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
+            for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
+                for (int z = 32; z < CHUNK_HEIGHT_VOXELS; z++) {
+
+                }
+            }
+        }
+    }
 }
