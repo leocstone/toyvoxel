@@ -192,6 +192,8 @@ static void grassTest(VoxelChunk* result, double minHeight) {
 
 }
 
+const glm::vec3 voxelCenter(0.5 / float(VOXELS_PER_METER), 0.5 / float(VOXELS_PER_METER), 0.5 / float(VOXELS_PER_METER));
+
 /*
 Returns a voxel fragment contained within an AABB from origin to dimensions
 */
@@ -204,7 +206,6 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
 
     // Constants
     const glm::vec3 center(dimensions.x / 2.0f, dimensions.y / 2.0f, 0.0);
-    const glm::vec3 voxelCenter(0.5 / float(VOXELS_PER_METER), 0.5 / float(VOXELS_PER_METER), 0.5 / float(VOXELS_PER_METER));
     const float initialTreeRadius = glm::min(dimensions.x, dimensions.y) / 4.0;
     const float trunkHeight = dimensions.z * (float(randomTrunkHeight(rng)) / 100.0f);
     const float max_branch_length = 3.0f;
@@ -393,26 +394,121 @@ static void computeDistances(VoxelChunk* chunkIn) {
 }
 
 void WorldGenerator::generateChunk(VoxelChunk* result, int chunkX, int chunkY) {
-    std::cout << "generating " << chunkX << ", " << chunkY << std::endl;
+    if (chunkX != -1 || chunkY != -1)
+        return;
     double grassHeight = 32;
     grassTest(result, grassHeight);
     for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
         for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
             for (int z = 33; z < CHUNK_HEIGHT_VOXELS; z++) {
-                result->setVoxel(x, y, z, std::min(z - 33, 127));
+                //result->setVoxel(x, y, z, std::min(z - 33, 127));
             }
         }
     }
+    std::vector<Voxel> materials;
     // Add building
-    if (chunkX % 2 == 0 && chunkY % 2 == 0) {
-        SDFChain buildingChain;
-        SDFLink wall1Link;
-        SDFAABB wall1AABB(glm::vec3(CHUNK_WIDTH_METERS, 0.2f, CHUNK_HEIGHT_METERS - 2.0f));
-        SDFTransformOp wall1T;
-        for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
-            for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
-                for (int z = 32; z < CHUNK_HEIGHT_VOXELS; z++) {
+    std::uniform_int_distribution<int> randomShackOffset(1, CHUNK_WIDTH_VOXELS - 7 * VOXELS_PER_METER);
+    const float wallThickness = 0.2f;
+    const float shackHeight = 3.0f;
+    const float baseHeight = 0.3f;
+    const float shackWidthX = 5.0f;
+    const float shackWidthY = 7.0f;
+    const float doorWidth = 1.1f;
+    const float doorHeight = 2.0f;
+    const float doorMargin = 1.0f;
+    float offsetX = float(randomShackOffset(rng)) / float(VOXELS_PER_METER);
+    float offsetY = float(randomShackOffset(rng)) / float(VOXELS_PER_METER);
+    SDFChain buildingChain;
+    SDFLink baseLink;
+    SDFAABB baseAABB(glm::vec3(shackWidthX, shackWidthY, baseHeight));
+    SDFTransformOp baseT;
+    //baseT.addTranslation(glm::vec3(CHUNK_WIDTH_METERS / 2.0f - 2.5f, CHUNK_WIDTH_METERS / 2.0f - 3.5f, grassHeight / VOXELS_PER_METER));
+    baseT.addTranslation(glm::vec3(shackWidthX / 2.0f + offsetX, shackWidthY / 2.0f + offsetY, baseHeight / 2.0f + grassHeight / VOXELS_PER_METER));
+    baseLink.s = &baseAABB;
+    baseLink.t = baseT;
+    baseLink.c = nullptr;
+    buildingChain.addLink(baseLink);
+    materials.push_back(Stone);
 
+    /* Walls */
+    SDFLink wallsLink;
+    SDFChain wallsChain;
+    SDFUnion combine;
+    wallsLink.t = SDFTransformOp();
+    wallsLink.c = &combine;
+    wallsLink.s = &wallsChain;
+
+    /* -x */
+    SDFLink wall1Link;
+    SDFAABB wall1AABB(glm::vec3(shackWidthX, wallThickness, shackHeight));
+    SDFTransformOp wall1T;
+    wall1T.addTranslation(glm::vec3(shackWidthX / 2.0f + offsetX, wallThickness / 2.0f + offsetY, shackHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
+    wall1Link.s = &wall1AABB;
+    wall1Link.t = wall1T;
+    wall1Link.c = &combine;
+    wallsChain.addLink(wall1Link);
+
+    /* +x */
+    SDFLink wall3Link;
+    SDFAABB wall3AABB(glm::vec3(shackWidthX, wallThickness, shackHeight));
+    SDFTransformOp wall3T;
+    wall3T.addTranslation(glm::vec3(shackWidthX / 2.0f + offsetX, shackWidthY - wallThickness / 2.0f + offsetY, shackHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
+    wall3Link.s = &wall3AABB;
+    wall3Link.t = wall3T;
+    wall3Link.c = &combine;
+    wallsChain.addLink(wall3Link);
+
+    /* -y */
+    SDFLink wall2Link;
+    SDFAABB wall2AABB(glm::vec3(wallThickness, shackWidthY, shackHeight));
+    SDFTransformOp wall2T;
+    wall2T.addTranslation(glm::vec3(wallThickness / 2.0f + offsetX, shackWidthY / 2.0f + offsetY, shackHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
+    wall2Link.s = &wall2AABB;
+    wall2Link.t = wall2T;
+    wall2Link.c = &combine;
+    wallsChain.addLink(wall2Link);
+
+    /* +y */
+    SDFLink wall4Link;
+    SDFAABB wall4AABB(glm::vec3(wallThickness, shackWidthY, shackHeight));
+    SDFTransformOp wall4T;
+    wall4T.addTranslation(glm::vec3(shackWidthX - wallThickness / 2.0f + offsetX, shackWidthY / 2.0f + offsetY, shackHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
+    wall4Link.s = &wall4AABB;
+    wall4Link.t = wall4T;
+    wall4Link.c = &combine;
+    wallsChain.addLink(wall4Link);
+
+    /* Doorway */
+    SDFSubtract subtraction;
+    std::uniform_int_distribution<int> randomDoorOffset(0, 100);
+    const float minDoorOffset = doorMargin + doorWidth / 2.0f;
+    const float maxDoorOffset = shackWidthX - doorWidth - doorMargin;
+    float doorOffset = std::min(minDoorOffset, (float(randomDoorOffset(rng)) / 100.0f) * maxDoorOffset);
+    SDFLink doorwayLink;
+    SDFAABB doorwayAABB(glm::vec3(doorWidth, wallThickness, doorHeight));
+    SDFTransformOp doorwayT;
+    doorwayT.addTranslation(glm::vec3(doorWidth / 2.0f + doorOffset + offsetX, shackWidthY - wallThickness / 2.0f + offsetY, doorHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
+    doorwayLink.s = &doorwayAABB;
+    doorwayLink.t = doorwayT;
+    doorwayLink.c = &subtraction;
+    wallsChain.addLink(doorwayLink);
+
+    buildingChain.addLink(wallsLink);
+    materials.push_back(Wood);
+
+    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
+        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
+            for (int z = 32; z < CHUNK_HEIGHT_VOXELS; z++) {
+                glm::vec3 curPoint(float(x) / float(VOXELS_PER_METER) + voxelCenter.x,
+                                   float(y) / float(VOXELS_PER_METER) + voxelCenter.y,
+                                   float(z) / float(VOXELS_PER_METER) + voxelCenter.z);
+                DistResult distSample = buildingChain.minDist(curPoint);
+                if (distSample.distance <= 0.0f) {
+                    result->setVoxel(x, y, z, -materials[distSample.minIndex]);
+                } else {
+                    int8_t voxelDistToStructure = int8_t(std::min(127, std::max(0, int(distSample.distance * VOXELS_PER_METER) - 2)));
+                    int8_t voxelDistToTerrain = result->getVoxel(x, y, z);
+                    result->setVoxel(x, y, z, std::min(voxelDistToStructure, voxelDistToTerrain));
                 }
             }
         }

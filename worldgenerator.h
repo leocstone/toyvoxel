@@ -16,12 +16,21 @@ if 0, there is no voxel here and no distance information
 */
 typedef int8_t Voxel;
 
+enum VoxelID {
+    Stone = 1,
+    Dirt = 2,
+    Grass = 3,
+    Bark = 4,
+    Wood = 5,
+    Glass = 6
+};
+
 // A chunk is 16x16 meters XY
 constexpr int CHUNK_WIDTH_METERS = 16;
 // and 256 meters tall
-constexpr int CHUNK_HEIGHT_METERS = 32;
+constexpr int CHUNK_HEIGHT_METERS = 16;
 // There are 8 voxels in 1 meter
-constexpr int VOXELS_PER_METER = 16;
+constexpr int VOXELS_PER_METER = 32;
 
 constexpr int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
 constexpr int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;

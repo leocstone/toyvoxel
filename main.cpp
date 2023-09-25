@@ -74,7 +74,7 @@ const std::vector<uint16_t> indices = {
 
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
-const uint32_t RENDER_SCALE = 1;
+const uint32_t RENDER_SCALE = 2;
 
 struct UniformBufferObject {
     alignas(16) glm::mat4 model;
@@ -360,6 +360,9 @@ private:
     /* Debug messenger */
     VkDebugUtilsMessengerEXT debugMessenger;
 
+    /* Voxels */
+    LoadedChunks* chunks = nullptr;
+
     /* Camera / player */
     Camera camera;
     glm::ivec2 lastUpdatePlayerChunk;
@@ -369,8 +372,8 @@ private:
     double cursorY;
     double cursorLastX;
     double cursorLastY;
-    double cameraRotY = -0.0240741;
-    double cameraRotZ = -0.486458;
+    double cameraRotY = 0;
+    double cameraRotZ = 0;
     static constexpr double minPitch = -1.5;
     static constexpr double maxPitch = 1.5;
     static constexpr double sensitivity = 2.0;
@@ -1528,7 +1531,7 @@ private:
                                            int(camera.position.y) / CHUNK_WIDTH_VOXELS);
         size_t voxelBufferSize = sizeof(LoadedChunks);
         std::cout << "Creating a voxel buffer of size " << voxelBufferSize << std::endl;
-        LoadedChunks* chunks = new LoadedChunks;
+        chunks = new LoadedChunks;
         std::cout << "Generating chunks: 0 / " << TOTAL_CHUNKS_LOADED;
         std::cout.flush();
         for (int x = 0; x < LOADED_CHUNKS_AXIS; x++) {
@@ -1550,7 +1553,7 @@ private:
         vkMapMemory(device, stagingBufferMemory, 0, voxelBufferSize, 0, &data);
             memcpy(data, &chunks->voxels, voxelBufferSize);
         vkUnmapMemory(device, stagingBufferMemory);
-        delete chunks;
+        //delete chunks;
 
         voxelBuffers.resize(MAX_FRAMES_IN_FLIGHT);
         voxelBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
@@ -2966,6 +2969,17 @@ private:
         cursorDeltaX *= sensitivity;
         cursorDeltaY *= sensitivity;
 
+        /* Gravity */
+        glm::vec3 footPosition(camera.position);
+        //const float groundHeight =
+        footPosition.z -= 1.8f;
+        if (footPosition.z > 4.0f) {
+            camera.position.z -= 9.8f * deltaTime;
+        }
+        if (camera.position.z < 2.2f) {
+            camera.position.z = 2.2f;
+        }
+
         /* Camera rotation */
         if (!console.isEnabled()) {
             cameraRotY -= cursorDeltaY;
@@ -2994,6 +3008,7 @@ private:
                 moveDirection += camera.right;
             if (keyPressed[GLFW_KEY_LEFT_SHIFT])
                 moveSpeed = 10.0f;
+            moveDirection.z = 0.0f;
             camera.position += moveDirection * deltaTime * moveSpeed;
             //std::cout << "Camera: " << camera.position.x << ", " << camera.position.y << ", " << camera.position.z << std::endl;
             //std::cout << "Rot Z: " << cameraRotZ << " Rot Y: " << cameraRotY << std::endl;

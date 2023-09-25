@@ -19,11 +19,12 @@ class SDFAABB : public SDF
 public:
     SDFAABB() { dimensions = glm::vec3(0, 0, 0); }
     SDFAABB(const glm::vec3& _dimensions) {
-        dimensions = _dimensions;
+        dimensions = glm::vec3(_dimensions.x / 2.0f, _dimensions.y / 2.0f, _dimensions.z / 2.0f);
     }
     ~SDFAABB() {}
 
     /* Copied from iq */
+    // Dimensions extend in each direction in this equation...
     float dist(const glm::vec3& point) {
         glm::vec3 q = glm::abs(point) - dimensions;
         return glm::length(glm::max(glm::max(q.x, glm::max(q.y, q.z)),0.0f)) + glm::min(glm::max(q.x,glm::max(q.y,q.z)),0.0f);

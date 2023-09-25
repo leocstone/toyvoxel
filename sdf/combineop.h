@@ -36,6 +36,28 @@ private:
     float smoothAmount;
 };
 
+class SDFSubtract : public SDFCombineOp
+{
+public:
+    SDFSubtract() {}
+    ~SDFSubtract() {}
+
+    float combinedDist(float s1, float s2) {
+        return glm::max(s1, -s2);
+    }
+};
+
+class SDFIntersection : public SDFCombineOp
+{
+public:
+    SDFIntersection() {}
+    ~SDFIntersection() {}
+
+    float combinedDist(float s1, float s2) {
+        return glm::max(s1, s2);
+    }
+};
+
 /*
 For displacements
 */
