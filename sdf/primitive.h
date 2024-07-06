@@ -1,6 +1,12 @@
 #ifndef PRIMITIVE_H
 #define PRIMITIVE_H
 #include "sdf.h"
+
+/*
+Definitions for simple SDF functions
+SDF functions from Inigo Quilez (https://iquilezles.org/articles/distfunctions/)
+*/
+
 /* Simple sphere at origin */
 class SDFSphere : public SDF
 {
