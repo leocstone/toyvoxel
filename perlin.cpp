@@ -1,5 +1,10 @@
 #include "perlin.h"
 
+/*
+Source:
+https://adrianb.io/2014/08/09/perlinnoise.html
+*/
+
 // Hash lookup table as defined by Ken Perlin.  This is a randomly
 // arranged array of all numbers from 0-255 inclusive.
 /*

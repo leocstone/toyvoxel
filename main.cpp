@@ -537,7 +537,7 @@ private:
     void initWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        window = glfwCreateWindow(WIDTH, HEIGHT, "yesheng", glfwGetPrimaryMonitor(), nullptr);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "renderer", glfwGetPrimaryMonitor(), nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
         for (int i = 0; i < GLFW_KEY_LAST; i++) {
@@ -691,102 +691,6 @@ private:
             copyBuffer(voxelBuffers[0], voxelBuffers[i], sizeof(LoadedChunks));
         }
     }
-
-    /*
-    void computeVoxelDistancesIterated() {
-        VkFence computeDistanceFence;
-
-        VkFenceCreateInfo computeFenceInfo {};
-        computeFenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        computeFenceInfo.flags = 0;
-
-        if (vkCreateFence(device, &computeFenceInfo, nullptr, &computeDistanceFence) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create compute distance fences!");
-        }
-
-        const int dispatchSizeX = 1;
-        const int dispatchSizeY = 1;
-        const int dispatchSizeZ = 1;
-        const int workgroupSizeX = 8;
-        const int workgroupSizeY = 8;
-        const int workgroupSizeZ = 16;
-        const int numIterationsX = (CHUNK_WIDTH_VOXELS / workgroupSizeX) / dispatchSizeX;
-        const int numIterationsY = (CHUNK_WIDTH_VOXELS / workgroupSizeY) / dispatchSizeY;
-        const int numIterationsZ = (CHUNK_HEIGHT_VOXELS / workgroupSizeZ) / dispatchSizeZ;
-        std::cout << numIterationsX << "x" << numIterationsY << "x"<< numIterationsZ << " = " << numIterationsX * numIterationsY * numIterationsZ << " total iterations" << std::endl;
-        std::cout.flush();
-        DistancesPushConstants pushConstants;
-        pushConstants.curVoxelOffset = glm::ivec3(0, 0, 0);
-
-        for (int x = 0; x < numIterationsX; x++)
-        {
-            pushConstants.curVoxelOffset.y = 0;
-            for (int y = 0; y < numIterationsY; y++)
-            {
-                pushConstants.curVoxelOffset.z = 0;
-                for (int z = 0; z < numIterationsZ; z++)
-                {
-                    VkCommandBufferBeginInfo beginInfo {};
-                    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-                    if (vkBeginCommandBuffer(computeDistancesCommandBuffers[0], &beginInfo) != VK_SUCCESS)
-                    {
-                        throw std::runtime_error("Failed to begin recording compute command buffer!");
-                    }
-
-                    vkCmdBindPipeline(computeDistancesCommandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, computeDistancesPipeline);
-                    vkCmdBindDescriptorSets(computeDistancesCommandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, computeDistancesPipelineLayout,
-                                            0, 1, &computeDistancesDescriptorSets[0], 0, nullptr);
-
-                    vkCmdPushConstants(computeDistancesCommandBuffers[0], computeDistancesPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DistancesPushConstants), &pushConstants);
-                    vkCmdDispatch(computeDistancesCommandBuffers[0], dispatchSizeX, dispatchSizeY, dispatchSizeZ);
-
-                    if (vkEndCommandBuffer(computeDistancesCommandBuffers[0]) != VK_SUCCESS)
-                    {
-                        throw std::runtime_error("Failed to record compute distances command buffer!");
-                    }
-
-                    VkSubmitInfo computeDistancesSubmitInfo {};
-                    computeDistancesSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-
-                    computeDistancesSubmitInfo.waitSemaphoreCount = 0;
-                    computeDistancesSubmitInfo.pWaitSemaphores = nullptr;
-                    computeDistancesSubmitInfo.pWaitDstStageMask = nullptr;
-
-                    computeDistancesSubmitInfo.commandBufferCount = 1;
-                    computeDistancesSubmitInfo.pCommandBuffers = &computeDistancesCommandBuffers[0];
-
-                    computeDistancesSubmitInfo.signalSemaphoreCount = 0;
-                    computeDistancesSubmitInfo.pSignalSemaphores = nullptr;
-
-                    VkResult result;
-                    if ((result = vkQueueSubmit(computeQueue, 1, &computeDistancesSubmitInfo, computeDistanceFence)) != VK_SUCCESS)
-                    {
-                        std::cerr << string_VkResult(result) << std::endl;
-                        throw std::runtime_error("Failed to submit compute distances command buffer");
-                    }
-                    if ((result = vkWaitForFences(device, 1, &computeDistanceFence, VK_TRUE, UINT64_MAX)) != VK_SUCCESS)
-                    {
-                        std::cerr << "Error waiting for fence: " << string_VkResult(result) << std::endl;
-                        throw std::runtime_error("Failed to wait for compute distances fence!");
-                    }
-                    vkResetCommandBuffer(computeDistancesCommandBuffers[0], 0);
-                    vkResetFences(device, 1, &computeDistanceFence);
-                    std::cout << "Computed distances for " << pushConstants.curVoxelOffset.x << ", " << pushConstants.curVoxelOffset.y << ", " << pushConstants.curVoxelOffset.z << std::endl;
-                    pushConstants.curVoxelOffset.z += workgroupSizeZ * dispatchSizeZ;
-                }
-                pushConstants.curVoxelOffset.y += workgroupSizeY * dispatchSizeY;
-            }
-            pushConstants.curVoxelOffset.x += workgroupSizeX * dispatchSizeX;
-        }
-
-        vkDestroyFence(device, computeDistanceFence, nullptr);
-
-        for (int i = 1; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            copyBuffer(voxelBuffers[0], voxelBuffers[i], CHUNK_SIZE_BYTES);
-        }
-    }
-    */
 
     void createComputeDistancesLayout() {
         std::array<VkDescriptorSetLayoutBinding, 1> layoutBindings {};
@@ -2865,7 +2769,7 @@ private:
 
         VkApplicationInfo appInfo {};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.pApplicationName = "yesheng";
+        appInfo.pApplicationName = "renderer";
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -2903,7 +2807,6 @@ private:
         double timeSpentRendering = 0.0;
         while (!glfwWindowShouldClose(window) && !shouldQuit) {
             glfwPollEvents();
-            //std::cout << "Frame " << currentFrame << std::endl;
             /** Avoid putting syscalls here - they seem to break the timer **/
             const auto start = std::chrono::high_resolution_clock::now();
             drawFrame();
@@ -3198,57 +3101,8 @@ private:
     }
 };
 
-/*
-struct Matrix2D {
-    int8_t matrix[3][3];
-};
-
-struct MatrixFlat {
-    int8_t matrix_flat[9];
-};
-
-void testCppArrays() {
-    std::cout << "sizeof(Matrix2D) == " << sizeof(Matrix2D) << std::endl;
-    std::cout << "sizeof(MatrixFlat) == " << sizeof(MatrixFlat) << std::endl;
-    Matrix2D m2d;
-    MatrixFlat mf;
-    for (int x = 0; x < 3; x++) {
-        for (int y = 0; y < 3; y++) {
-            m2d.matrix[y][x] = x + y * 3;
-            mf.matrix_flat[x + y * 3] = x + y * 3;
-        }
-    }
-    std::cout << "2D:" << std::endl;
-    for (int y = 0; y < 3; y++) {
-        for (int x = 0; x < 3; x++) {
-            std::cout << "\t(" << x << ", " << y << ") offset: " << &m2d.matrix[y][x] - reinterpret_cast<int8_t*>(&m2d) << " content: " << int(m2d.matrix[y][x]) << std::endl;
-        }
-    }
-    std::cout << "Flat:" << std::endl;
-    for (int y = 0; y < 3; y++) {
-        for (int x = 0; x < 3; x++) {
-            std::cout << "\t(" << int(mf.matrix_flat[x + y * 3]) << ")" << std::endl;
-        }
-    }
-    std::cout << "2D:" << std::endl;
-    for (int y = 0; y < 3; y++) {
-        for (int x = 0; x < 3; x++) {
-            std::cout << "\t(" << int(m2d.matrix[x][y]) << ")" << std::endl;
-        }
-    }
-
-    std::cout << "Flat:" << std::endl;
-
-    for (int y = 0; y < 3; y++) {
-        for (int x = 0; x < 3; x++) {
-            std::cout << "\t(" << int(mf.matrix_flat[x + y * 3]) << ")" << std::endl;
-        }
-    }
-}
-*/
-
 int main() {
-    std::cout << ANSI::escape("------------------------------------yesheng-------------------------------------", BOLD, FG_DEFAULT) << std::endl;
+    std::cout << ANSI::escape("--------------------------------------------------------------------------------", BOLD, FG_DEFAULT) << std::endl;
     Game app;
 
     try {
