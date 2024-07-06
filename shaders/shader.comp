@@ -4,7 +4,7 @@
 
 const int CHUNK_WIDTH_METERS = 16;
 const int CHUNK_HEIGHT_METERS = 16;
-const int VOXELS_PER_METER = 32;
+const int VOXELS_PER_METER = 16;
 const int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
 const int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
 /* Chunking */
@@ -56,8 +56,9 @@ layout(std430, binding = 1) readonly buffer VoxelChunksIn {
 /* Rendering */
 const int SAMPLES = 1;
 const int MAX_STEPS = 10000;
-const int MAX_BOUNCES = 3;
+const int MAX_BOUNCES = 10;
 const float MAX_DIST = 10000.0;
+const float MAX_INDIRECT_DIST = 2.0;
 
 vec3 skyboxColorInDirection(vec3 direction) {
     return vec3(0.0);
@@ -97,7 +98,6 @@ struct VoxelIntersection {
 /*
 Main voxel intersection function
 */
-/* Only need to compute the array offset of the first check, then add to index accordingly for subsequent marching iterations */
 VoxelIntersection distanceToVoxelAlongRay(vec3 origin, vec3 direction, float maxlen) {
     vec3 accumulatedColor = vec3(0.0);
     const vec3 rayAxesDirections = sign(direction);
@@ -196,6 +196,7 @@ VoxelIntersection distanceToVoxelAlongRay(vec3 origin, vec3 direction, float max
         }
         /* Value is voxel id */
         else if (v < 0) {
+            // Transparent voxel
             if (v == -6) {
                 accumulatedColor = vec3(0.1);
             } else {
@@ -234,12 +235,14 @@ float indirectLightingAtPoint(vec3 point, vec3 normal, vec3 sunDir) {
     for (int bounce = 0; bounce < MAX_BOUNCES; bounce++) {
         // Offset the normal by a small amount
         const float diffuse = 1.0;
-        vec3 dirMask = vec3(normal.x != 0 ? 0.0 : diffuse, normal.y != 0 ? 0.0 : diffuse, normal.z != 0 ? 0.0 : diffuse);
-        vec3 randomOffset = vec3(random(vec2(point.z + point.x, point.y - point.x)),
-                                 random(vec2(point.x - point.z, point.z + point.y)),
-                                 random(vec2(point.y + point.z, point.x - point.y))) * dirMask;
+        vec3 dirMask = vec3(normal.x != 0 ? 0.0 : diffuse,
+                            normal.y != 0 ? 0.0 : diffuse,
+                            normal.z != 0 ? 0.0 : diffuse);
+        vec3 randomOffset = vec3(random(vec2(point.z + point.x, point.y - point.x)) - 0.5,
+                                 random(vec2(point.x - point.z, point.z + point.y)) - 0.5,
+                                 random(vec2(point.y + point.z, point.x - point.y)) - 0.5) * dirMask;
         vec3 curDirection = normalize(normal + randomOffset);
-        VoxelIntersection curBounce = distanceToVoxelAlongRay(point, curDirection, MAX_DIST);
+        VoxelIntersection curBounce = distanceToVoxelAlongRay(point, curDirection, MAX_INDIRECT_DIST);
         if (curBounce.dist >= 0.0) {
             point += curBounce.dist * curDirection;
             normal = curBounce.normal;
@@ -334,5 +337,5 @@ void main() {
     outputColor /= float(SAMPLES);
     //outputColor = vec3(pow(outputColor.x, 0.45), pow(outputColor.y, 0.45), pow(outputColor.z, 0.45));
     
-    imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(outputColor + 0.03 * vec3(random(vec2(gl_GlobalInvocationID.x / 1920.0 + pushConstants.time, gl_GlobalInvocationID.y / 1080.0 + pushConstants.time))), 1.0));
+    imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(outputColor + 0.0 * vec3(random(vec2(gl_GlobalInvocationID.x / 1920.0 + pushConstants.time, gl_GlobalInvocationID.y / 1080.0 + pushConstants.time))), 1.0));
 }

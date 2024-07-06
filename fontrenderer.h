@@ -35,8 +35,8 @@ struct RGBAPixel {
 
 /** Constants **/
 constexpr int FONT_WIDTH_GLYPHS = 16;
-constexpr int glyphWidthPixels = 16;
-constexpr int glyphHeightPixels = 32;
+constexpr int glyphWidthPixels = 8;
+constexpr int glyphHeightPixels = 9;
 constexpr int rowSizePixels = FONT_WIDTH_GLYPHS * glyphWidthPixels;
 constexpr double GLYPH_WIDTH_TEXCOORDS = 1.0 / double(FONT_WIDTH_GLYPHS);
 constexpr double CONSOLE_MARGIN = 0.005;
@@ -65,9 +65,9 @@ public:
     void updateResolution(int x, int y) {
         screenWidth = x;
         screenHeight = y;
-        curAspect = double(screenWidth) / double(screenHeight);
-        glyphHeightScreen = ((double(glyphHeightPixels) / double(screenHeight)) * glyphHeightPixels) / 12.0;
-        glyphWidthScreen = (((double(glyphWidthPixels) / double(screenWidth)) * glyphWidthPixels) * curAspect) / 12.0;
+        curAspect = double(screenHeight) / double(screenWidth);
+        glyphHeightScreen = ((double(glyphHeightPixels) / double(screenHeight)) * glyphHeightPixels);
+        glyphWidthScreen = (((double(glyphWidthPixels) / double(screenWidth)) * glyphWidthPixels) * curAspect);
     }
 
     void addMeshForLabel(FontMesh& result, const char* label, const glm::vec2& origin);

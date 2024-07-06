@@ -27,7 +27,7 @@ static bool platformIsLittleEndian() {
 }
 
 struct Camera {
-    alignas(16) glm::vec3 position = glm::vec3(0, 0, 0);//glm::vec3(-32.3128, 29.9501, 16.8475);
+    alignas(16) glm::vec3 position = glm::vec3(0, 0, 10.0);
     alignas(16) glm::vec3 forward = glm::vec3(0, 1, 0);
     alignas(16) glm::vec3 up = glm::vec3(0, 0, 1);
     alignas(16) glm::vec3 right = glm::vec3(1, 0, 0);
@@ -393,7 +393,7 @@ private:
 
         glm::vec2 cursor(-1.0, -1.0);
         /* Title text */
-        const char* titleText = "yesheng alpha 0.01";
+        const char* titleText = "voxel renderer";
         double labelWidth = fontRenderer.getGlyphWidthScreen() * strlen(titleText) + CONSOLE_MARGIN * 2.0;
         double labelHeight = fontRenderer.getGlyphHeightScreen() + CONSOLE_MARGIN * 2.0;
         fontRenderer.addMeshForBG(result, FONT_BG2_UV, cursor, {-1.0 + labelWidth, cursor.y + labelHeight});
@@ -426,7 +426,7 @@ private:
         FontMesh result;
 
         /* Command buffer */
-        glm::vec2 cursor(-1.0 + CONSOLE_MARGIN, -1.0 + (fontRenderer.getGlyphHeightScreen() + 2.0 * CONSOLE_MARGIN) * 3.0);
+        glm::vec2 cursor(-1.0 + CONSOLE_MARGIN, -1.0 + (fontRenderer.getGlyphHeightScreen() + 2.0 * CONSOLE_MARGIN) * 4.0);
         fontRenderer.addMeshForBG(result, FONT_BG2_UV, {-1.0, cursor.y + fontRenderer.getGlyphHeightScreen()},
                                                        {1.0, cursor.y});
         fontRenderer.addMeshForLabel(result, console.getCommandBuf(), cursor);
@@ -452,6 +452,7 @@ private:
 
     /*
     UTF-32 text input
+    Just used for ASCII input to console
     */
     static void charCallback(GLFWwindow* window, unsigned int codepoint) {
         Game* app = reinterpret_cast<Game*>(glfwGetWindowUserPointer(window));
@@ -586,7 +587,6 @@ private:
         createFpsCounterBuffers();
         createUniformBuffers();
         createVoxelBuffers();
-        //throw std::runtime_error("test");
         createRenderImages();
         createRenderImageViews();
         createDescriptorPool();
@@ -1459,7 +1459,7 @@ private:
     void loadFont() {
         int texWidth, texHeight, texChannels;
         int desired_channels = STBI_rgb_alpha;
-        stbi_uc* pixels = stbi_load("textures/ascii_font_tall_big_handwritten.png", &texWidth, &texHeight,
+        stbi_uc* pixels = stbi_load("textures/simple_8x9.png", &texWidth, &texHeight,
                                     &texChannels, desired_channels);
 
         if (!pixels) {
@@ -2970,15 +2970,14 @@ private:
         cursorDeltaY *= sensitivity;
 
         /* Gravity */
-        glm::vec3 footPosition(camera.position);
-        //const float groundHeight =
-        footPosition.z -= 1.8f;
-        if (footPosition.z > 4.0f) {
+        /*
+        if (camera.position.z > 1.8f) {
             camera.position.z -= 9.8f * deltaTime;
         }
-        if (camera.position.z < 2.2f) {
-            camera.position.z = 2.2f;
+        if (camera.position.z < 1.8f) {
+            camera.position.z = 1.8f;
         }
+        */
 
         /* Camera rotation */
         if (!console.isEnabled()) {
@@ -3008,7 +3007,7 @@ private:
                 moveDirection += camera.right;
             if (keyPressed[GLFW_KEY_LEFT_SHIFT])
                 moveSpeed = 10.0f;
-            moveDirection.z = 0.0f;
+            //moveDirection.z = 0.0f;
             camera.position += moveDirection * deltaTime * moveSpeed;
             //std::cout << "Camera: " << camera.position.x << ", " << camera.position.y << ", " << camera.position.z << std::endl;
             //std::cout << "Rot Z: " << cameraRotZ << " Rot Y: " << cameraRotY << std::endl;

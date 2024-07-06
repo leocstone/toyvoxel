@@ -30,7 +30,7 @@ constexpr int CHUNK_WIDTH_METERS = 16;
 // and 256 meters tall
 constexpr int CHUNK_HEIGHT_METERS = 16;
 // There are 8 voxels in 1 meter
-constexpr int VOXELS_PER_METER = 32;
+constexpr int VOXELS_PER_METER = 16;
 
 constexpr int CHUNK_WIDTH_VOXELS = CHUNK_WIDTH_METERS * VOXELS_PER_METER;
 constexpr int CHUNK_HEIGHT_VOXELS = CHUNK_HEIGHT_METERS * VOXELS_PER_METER;
@@ -86,6 +86,7 @@ struct VoxelFragment {
     ~VoxelFragment() {
         //delete[] voxels;
     }
+    void freeVoxels() { delete[] voxels; }
     Voxel getVoxel(int x, int y, int z) {
         return voxels[x + y * sizeX + z * sizeX * sizeY];
     }

@@ -135,13 +135,14 @@ static void grassTest(VoxelChunk* result, double minHeight) {
     for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
         for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
             for (int z = 0; z < minHeight; z++) {
+                /*
                 if (z <= allStoneHeight) {
                     double stoneHeight = Perlin::perlin(x / stone_scale_factor, y / stone_scale_factor, 55);
                     if (z < (stoneHeight * allStoneHeight)) {
-                        result->setVoxel(x, y, z, -4);
+                        result->setVoxel(x, y, z, -Stone);
                         continue;
                     } else {
-                        result->setVoxel(x, y, z, -2);
+                        result->setVoxel(x, y, z, -Dirt);
                     }
                 }
                 double height = minHeight;
@@ -149,10 +150,12 @@ static void grassTest(VoxelChunk* result, double minHeight) {
                 isStone *= isStone;
                 float stoneChanceForZ = float(z) / float(CHUNK_HEIGHT_VOXELS);
                 if (isStone > stoneChanceForZ) {
-                    result->setVoxel(x, y, z, -4);
+                    result->setVoxel(x, y, z, -Stone);
                 } else {
-                    result->setVoxel(x, y, z, -2);
+                    result->setVoxel(x, y, z, -Dirt);
                 }
+                */
+                result->setVoxel(x, y, z, -Dirt);
             }
         }
         //std::cout << "\rGenerating dirt voxels: " << x + 1 << " / " << CHUNK_WIDTH_VOXELS;
@@ -160,36 +163,19 @@ static void grassTest(VoxelChunk* result, double minHeight) {
     //std::cout << " done." << std::endl;
 
     // Grass
-
     constexpr int num_grass_blades = int(float(CHUNK_WIDTH_VOXELS * CHUNK_WIDTH_VOXELS) * 0.3);
     constexpr int max_height_voxels = 1;
     std::uniform_int_distribution<int> randomCoord(0, CHUNK_WIDTH_VOXELS - 1);
-    std::uniform_int_distribution<int> randomHeight(1, max_height_voxels);
-    std::uniform_int_distribution<int> randomBend(0, 10);
+    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
+        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
+            result->setVoxel(x, y, minHeight - 1, -Grass);
+        }
+    }
     for (int i = 0; i < num_grass_blades; i++) {
         int randomX = randomCoord(rng);
         int randomY = randomCoord(rng);
-        int totalBendX = 0;
-        int totalBendY = 0;
-        int bendDirX = randomGrassBend(randomBend(rng));
-        int bendDirY = randomGrassBend(randomBend(rng));
-        int randomBladeHeight = randomHeight(rng);
-        result->setVoxel(randomX, randomY, minHeight, -3);
-        for (int h = 1; h < randomBladeHeight; h++) {
-            int bendX = randomBend(rng) - h;
-            if (bendX >= 8 && totalBendX == 0 && totalBendY == 0) {
-                totalBendX += bendDirX;
-            }
-            int bendY = randomBend(rng) - h;
-            if (bendY >= 8 && totalBendX == 0 && totalBendY == 0) {
-                totalBendY += bendDirY;
-            }
-            int placedX = std::clamp(randomX + totalBendX, 0, CHUNK_WIDTH_VOXELS - 1);
-            int placedY = std::clamp(randomY + totalBendY, 0, CHUNK_WIDTH_VOXELS - 1);
-            result->setVoxel(placedX, placedY, minHeight + h, -3);
-        }
+        result->setVoxel(randomX, randomY, minHeight, -Grass);
     }
-
 }
 
 const glm::vec3 voxelCenter(0.5 / float(VOXELS_PER_METER), 0.5 / float(VOXELS_PER_METER), 0.5 / float(VOXELS_PER_METER));
@@ -202,12 +188,12 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
                                               VOXELS_PER_METER * glm::ceil(dimensions.y),
                                               VOXELS_PER_METER * glm::ceil(dimensions.z));
 
-    std::uniform_int_distribution<int> randomTrunkHeight(70, 75); // Trunk is 70-75% of available vertical space
+    std::uniform_real_distribution<float> randomTrunkHeight(0.7f, 0.75f); // Trunk is 70-75% of available vertical space
 
     // Constants
     const glm::vec3 center(dimensions.x / 2.0f, dimensions.y / 2.0f, 0.0);
     const float initialTreeRadius = glm::min(dimensions.x, dimensions.y) / 4.0;
-    const float trunkHeight = dimensions.z * (float(randomTrunkHeight(rng)) / 100.0f);
+    const float trunkHeight = dimensions.z * randomTrunkHeight(rng);
     const float max_branch_length = 3.0f;
 
     // SDF chain representing tree
@@ -229,9 +215,10 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
     trunkEnd.z += trunkHeight;
     SDFCappedCone trunkCylinder(center, trunkEnd, initialTreeRadius * 0.9, initialTreeRadius * 0.9 * (1.0 - trunkHeight * 0.01));
     SDFTransformOp trunkT;
-    std::uniform_int_distribution<int> randomRotation(-3, 3);
-    trunkT.addRotation(float(randomRotation(rng)) / 100.0f, glm::vec3(1, 0, 0));
-    trunkT.addRotation(float(randomRotation(rng)) / 100.0f, glm::vec3(0, 1, 0));
+    // rotate trunk a little so it isn't perfectly vertical
+    std::uniform_real_distribution<float> randomRotation(-0.03f, 0.03f);
+    trunkT.addRotation(randomRotation(rng), glm::vec3(1, 0, 0));
+    trunkT.addRotation(randomRotation(rng), glm::vec3(0, 1, 0));
 
     // Make the trunk less cylindrical
     SDFSineDisplacement barkRoughness(glm::vec3(20.0, 20.0, 4.0), 0.01);
@@ -250,26 +237,26 @@ static VoxelFragment* proceduralTree(const glm::vec3& dimensions) {
     constexpr int max_branches = 10;
     float lastBranchHeight = 0.0f;
     std::uniform_int_distribution<int> randomNumBranches(min_branches, max_branches);
-    std::uniform_int_distribution<int> randomThickness(30, 40); // Branches are 50-75% as thick as last level
-    std::uniform_int_distribution<int> randomBranchHeight(60, 80); // Branches are 60-80% up the remaining length of the trunk
-    std::uniform_int_distribution<int> randomBranchDirection(0, 360); // Branch origin is some point along the outside of the trunk
-    std::uniform_int_distribution<int> randomBranchLength(800, 1000);
+    std::uniform_real_distribution<float> randomThickness(0.3f, 0.4f); // Branches are 30-40% as thick as last level
+    std::uniform_real_distribution<float> randomBranchHeight(0.6f, 0.8f); // Branches are 60-80% up the remaining length of the trunk
+    std::uniform_real_distribution<float> randomBranchDirection(0.0f, 2.0f * glm::pi<float>()); // Branch origin is some point along the outside of the trunk
+    std::uniform_real_distribution<float> randomBranchLength(0.8f, 1.0f);
     int numBranches = randomNumBranches(rng);
     SDFCurvedXYCone* branchCones = new SDFCurvedXYCone[numBranches];
     for (int branch = 0; branch < numBranches; branch++) {
-        float l1Thickness = float(randomThickness(rng)) / 100.0f;
-        float curBranchHeight = float(randomBranchHeight(rng)) / 100.0f;
+        float l1Thickness = randomThickness(rng);
+        float curBranchHeight = randomBranchHeight(rng);
 
         glm::vec3 curBranchStart = center;
         curBranchStart.z += trunkHeight * curBranchHeight;
-        float curBranchTheta = glm::radians(float(randomBranchDirection(rng)));
+        float curBranchTheta = randomBranchDirection(rng);
         glm::vec3 curBranchDirection(glm::cos(curBranchTheta), glm::sin(curBranchTheta), 0);
         glm::vec3 vectorToExterior = curBranchDirection;
-        vectorToExterior *= initialTreeRadius * 0.0;
+        vectorToExterior *= initialTreeRadius * 1.0;
         curBranchStart += vectorToExterior;
         curBranchStart = trunkT.transformPoint(curBranchStart);
 
-        float curBranchLength = (float(randomBranchLength(rng)) / 1000.0f) * max_branch_length;
+        float curBranchLength = randomBranchLength(rng) * max_branch_length;
         glm::vec3 curBranchEnd = curBranchStart + curBranchLength * curBranchDirection;
 
         SDFLink curBranch;
@@ -393,18 +380,30 @@ static void computeDistances(VoxelChunk* chunkIn) {
     //std::cout << std::endl;
 }
 
-void WorldGenerator::generateChunk(VoxelChunk* result, int chunkX, int chunkY) {
-    if (chunkX != -1 || chunkY != -1)
-        return;
-    double grassHeight = 32;
-    grassTest(result, grassHeight);
+/*
+Literally just 1 voxel for the floor
+*/
+void generatePavement(VoxelChunk* result, int chunkX, int chunkY) {
+    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
+        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
+            result->setVoxel(x, y, 0, -Stone);
+        }
+    }
+}
+
+void generateBuilding(VoxelChunk* result, int chunkX, int chunkY) {
+    double grassHeight = 1;
+    //grassTest(result, grassHeight);
+    generatePavement(result, chunkX, chunkY);
+    /*
     for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
         for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
             for (int z = 33; z < CHUNK_HEIGHT_VOXELS; z++) {
-                //result->setVoxel(x, y, z, std::min(z - 33, 127));
+                result->setVoxel(x, y, z, std::min(z - 33, 127));
             }
         }
     }
+    */
     std::vector<Voxel> materials;
     // Add building
     std::uniform_int_distribution<int> randomShackOffset(1, CHUNK_WIDTH_VOXELS - 7 * VOXELS_PER_METER);
@@ -423,7 +422,7 @@ void WorldGenerator::generateChunk(VoxelChunk* result, int chunkX, int chunkY) {
     SDFAABB baseAABB(glm::vec3(shackWidthX, shackWidthY, baseHeight));
     SDFTransformOp baseT;
     //baseT.addTranslation(glm::vec3(CHUNK_WIDTH_METERS / 2.0f - 2.5f, CHUNK_WIDTH_METERS / 2.0f - 3.5f, grassHeight / VOXELS_PER_METER));
-    baseT.addTranslation(glm::vec3(shackWidthX / 2.0f + offsetX, shackWidthY / 2.0f + offsetY, baseHeight / 2.0f + grassHeight / VOXELS_PER_METER));
+    baseT.addTranslation(glm::vec3(shackWidthX / 2.0f, shackWidthY / 2.0f, baseHeight / 2.0f + grassHeight / VOXELS_PER_METER));
     baseLink.s = &baseAABB;
     baseLink.t = baseT;
     baseLink.c = nullptr;
@@ -442,7 +441,7 @@ void WorldGenerator::generateChunk(VoxelChunk* result, int chunkX, int chunkY) {
     SDFLink wall1Link;
     SDFAABB wall1AABB(glm::vec3(shackWidthX, wallThickness, shackHeight));
     SDFTransformOp wall1T;
-    wall1T.addTranslation(glm::vec3(shackWidthX / 2.0f + offsetX, wallThickness / 2.0f + offsetY, shackHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
+    wall1T.addTranslation(glm::vec3(shackWidthX / 2.0f, wallThickness / 2.0f, shackHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
     wall1Link.s = &wall1AABB;
     wall1Link.t = wall1T;
     wall1Link.c = &combine;
@@ -452,7 +451,7 @@ void WorldGenerator::generateChunk(VoxelChunk* result, int chunkX, int chunkY) {
     SDFLink wall3Link;
     SDFAABB wall3AABB(glm::vec3(shackWidthX, wallThickness, shackHeight));
     SDFTransformOp wall3T;
-    wall3T.addTranslation(glm::vec3(shackWidthX / 2.0f + offsetX, shackWidthY - wallThickness / 2.0f + offsetY, shackHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
+    wall3T.addTranslation(glm::vec3(shackWidthX / 2.0f, shackWidthY - wallThickness / 2.0f, shackHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
     wall3Link.s = &wall3AABB;
     wall3Link.t = wall3T;
     wall3Link.c = &combine;
@@ -462,7 +461,7 @@ void WorldGenerator::generateChunk(VoxelChunk* result, int chunkX, int chunkY) {
     SDFLink wall2Link;
     SDFAABB wall2AABB(glm::vec3(wallThickness, shackWidthY, shackHeight));
     SDFTransformOp wall2T;
-    wall2T.addTranslation(glm::vec3(wallThickness / 2.0f + offsetX, shackWidthY / 2.0f + offsetY, shackHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
+    wall2T.addTranslation(glm::vec3(wallThickness / 2.0f, shackWidthY / 2.0f, shackHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
     wall2Link.s = &wall2AABB;
     wall2Link.t = wall2T;
     wall2Link.c = &combine;
@@ -472,7 +471,7 @@ void WorldGenerator::generateChunk(VoxelChunk* result, int chunkX, int chunkY) {
     SDFLink wall4Link;
     SDFAABB wall4AABB(glm::vec3(wallThickness, shackWidthY, shackHeight));
     SDFTransformOp wall4T;
-    wall4T.addTranslation(glm::vec3(shackWidthX - wallThickness / 2.0f + offsetX, shackWidthY / 2.0f + offsetY, shackHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
+    wall4T.addTranslation(glm::vec3(shackWidthX - wallThickness / 2.0f, shackWidthY / 2.0f, shackHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
     wall4Link.s = &wall4AABB;
     wall4Link.t = wall4T;
     wall4Link.c = &combine;
@@ -487,7 +486,7 @@ void WorldGenerator::generateChunk(VoxelChunk* result, int chunkX, int chunkY) {
     SDFLink doorwayLink;
     SDFAABB doorwayAABB(glm::vec3(doorWidth, wallThickness, doorHeight));
     SDFTransformOp doorwayT;
-    doorwayT.addTranslation(glm::vec3(doorWidth / 2.0f + doorOffset + offsetX, shackWidthY - wallThickness / 2.0f + offsetY, doorHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
+    doorwayT.addTranslation(glm::vec3(doorWidth / 2.0f + doorOffset, shackWidthY - wallThickness / 2.0f, doorHeight / 2.0f + grassHeight / VOXELS_PER_METER + baseHeight));
     doorwayLink.s = &doorwayAABB;
     doorwayLink.t = doorwayT;
     doorwayLink.c = &subtraction;
@@ -496,21 +495,27 @@ void WorldGenerator::generateChunk(VoxelChunk* result, int chunkX, int chunkY) {
     buildingChain.addLink(wallsLink);
     materials.push_back(Wood);
 
-    for (int x = 0; x < CHUNK_WIDTH_VOXELS; x++) {
-        for (int y = 0; y < CHUNK_WIDTH_VOXELS; y++) {
-            for (int z = 32; z < CHUNK_HEIGHT_VOXELS; z++) {
+    VoxelFragment shackFragment(shackWidthX * VOXELS_PER_METER, shackWidthY * VOXELS_PER_METER, shackHeight * VOXELS_PER_METER);
+
+    for (int x = 0; x < shackFragment.sizeX; x++) {
+        for (int y = 0; y < shackFragment.sizeY; y++) {
+            for (int z = 0; z < shackFragment.sizeZ; z++) {
                 glm::vec3 curPoint(float(x) / float(VOXELS_PER_METER) + voxelCenter.x,
                                    float(y) / float(VOXELS_PER_METER) + voxelCenter.y,
                                    float(z) / float(VOXELS_PER_METER) + voxelCenter.z);
                 DistResult distSample = buildingChain.minDist(curPoint);
                 if (distSample.distance <= 0.0f) {
-                    result->setVoxel(x, y, z, -materials[distSample.minIndex]);
+                    shackFragment.setVoxel(x, y, z, -materials[distSample.minIndex]);
                 } else {
-                    int8_t voxelDistToStructure = int8_t(std::min(127, std::max(0, int(distSample.distance * VOXELS_PER_METER) - 2)));
-                    int8_t voxelDistToTerrain = result->getVoxel(x, y, z);
-                    result->setVoxel(x, y, z, std::min(voxelDistToStructure, voxelDistToTerrain));
+                    shackFragment.setVoxel(x, y, z, 0);
                 }
             }
         }
     }
+    blitVoxels(result, &shackFragment, offsetX * VOXELS_PER_METER, offsetY * VOXELS_PER_METER, 0);
+    shackFragment.freeVoxels();
+}
+
+void WorldGenerator::generateChunk(VoxelChunk* result, int chunkX, int chunkY) {
+    forestTest(result);
 }
