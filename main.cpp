@@ -304,9 +304,6 @@ private:
     std::vector<VkDeviceMemory> renderImagesMemory;
     std::vector<VkImageView> renderImageViews;
 
-    VkImage textureImage;
-    VkDeviceMemory textureImageMemory;
-    VkImageView textureImageView;
     VkSampler textureSampler;
 
     /* Font rendering */
@@ -575,8 +572,6 @@ private:
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
-        loadVkImage("textures/texture.png", STBI_rgb_alpha, textureImage, textureImageMemory);
-        createTextureImageView();
         createTextureSampler();
         loadFont();
         createFontImageView();
@@ -1345,7 +1340,7 @@ private:
 
         vkBindImageMemory(device, image, imageMemory, 0);
     }
-
+    /*
     void createTextureImage() {
         int texWidth, texHeight, texChannels;
         stbi_uc* pixels = stbi_load("textures/texture.png", &texWidth, &texHeight,
@@ -1382,6 +1377,7 @@ private:
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
+    */
 
     /*
     Load a given file to a VkImage and VkDeviceMemory
@@ -1495,10 +1491,6 @@ private:
         }
 
         return imageView;
-    }
-
-    void createTextureImageView() {
-        textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB);
     }
 
     void createFontImageView() {
@@ -3149,10 +3141,6 @@ private:
         vkFreeMemory(device, fontImageMemory, nullptr);
 
         vkDestroySampler(device, textureSampler, nullptr);
-        vkDestroyImageView(device, textureImageView, nullptr);
-
-        vkDestroyImage(device, textureImage, nullptr);
-        vkFreeMemory(device, textureImageMemory, nullptr);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroyBuffer(device, uniformBuffers[i], nullptr);
